@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# ========================
-# Config
-# ========================
 LOG_FILE="setup.log"
 OLD_LOG_FILE="setup.log.prev"
 DRY_RUN=false
 NON_INTERACTIVE=false
 
-# ========================
-# Args
-# ========================
 for arg in "$@"; do
   case $arg in
     --dry-run) DRY_RUN=true ;;
@@ -19,15 +13,12 @@ for arg in "$@"; do
   esac
 done
 
-# ========================
-# Logging + rotation
-# ========================
 rotate_logs() {
   [ -f "$LOG_FILE" ] && mv "$LOG_FILE" "$OLD_LOG_FILE"
   : > "$LOG_FILE"
 }
 
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
+log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOG_FILE"; }
 
 run() {
   if $DRY_RUN; then
@@ -41,15 +32,82 @@ rotate_logs
 log "🚀 n8n Stage 1 Lean Setup Starting"
 
 # ========================
-# Dependency checks
+# Distro detection
 # ========================
-check_dep() {
-  command -v "$1" >/dev/null 2>&1 || { log "❌ Missing dependency: $1"; exit 1; }
+detect_distro() {
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    echo "$ID"
+  else
+    echo "unknown"
+  fi
 }
 
-log "🔎 Checking dependencies..."
-for d in docker curl awk sed grep getent openssl; do check_dep "$d"; done
-run "docker info >/dev/null"
+DISTRO=$(detect_distro)
+log "Detected distro: $DISTRO"
+
+# ========================
+# Install deps
+# ========================
+install_pkg() {
+  local pkg="$1"
+  command -v "$pkg" >/dev/null 2>&1 && return 0
+
+  log "Installing $pkg..."
+  case "$DISTRO" in
+    ubuntu|debian)
+      run "sudo apt-get update -y"
+      run "sudo apt-get install -y $pkg"
+      ;;
+    rocky|almalinux|centos|rhel)
+      run "sudo dnf install -y $pkg"
+      ;;
+    arch)
+      run "sudo pacman -Sy --noconfirm $pkg"
+      ;;
+    *)
+      log "❌ Unsupported distro for auto-install: $DISTRO"
+      exit 1
+      ;;
+  esac
+}
+
+install_docker() {
+  if command -v docker >/dev/null 2>&1; then
+    log "Docker already installed"
+    return
+  fi
+
+  log "Installing Docker..."
+  case "$DISTRO" in
+    ubuntu|debian)
+      run "curl -fsSL https://get.docker.com | sudo sh"
+      ;;
+    rocky|almalinux|centos|rhel)
+      run "curl -fsSL https://get.docker.com | sudo sh"
+      ;;
+    arch)
+      run "sudo pacman -Sy --noconfirm docker"
+      run "sudo systemctl enable --now docker"
+      ;;
+    *)
+      log "❌ Docker install unsupported on $DISTRO"
+      exit 1
+      ;;
+  esac
+}
+
+# ========================
+# Install dependencies
+# ========================
+log "🔧 Ensuring dependencies..."
+
+for dep in curl awk sed grep getent openssl; do
+  install_pkg "$dep"
+done
+
+install_docker
+run "sudo systemctl enable --now docker || true"
 
 # ========================
 # Helpers
@@ -60,8 +118,12 @@ prompt() {
     eval "$var=\"$def\""
     log "Using default for $var=$def"
   else
-    read -rp "$text [$def]: " val
-    eval "$var=\"${val:-$def}\""
+    while true; do
+      read -rp "$text [$def]: " val
+      val="${val:-$def}"
+      [ -n "$val" ] && break
+    done
+    eval "$var=\"$val\""
   fi
 }
 
@@ -82,15 +144,14 @@ check_dns() {
   ip=$(getent hosts "$host" | awk '{print $1}' || true)
   if [ -z "$ip" ]; then
     echo "⚠️  DNS for $host not resolving yet."
-    echo "➡ If you want public HTTPS later, point DNS A/AAAA to this server."
+    echo "➡ Public HTTPS will work once DNS points here."
     return 1
   fi
   log "DNS OK: $host resolves to $ip"
-  return 0
 }
 
 # ========================
-# Detect latest stable n8n from Docker Hub
+# Detect latest n8n
 # ========================
 log "🔎 Detecting latest stable n8n version..."
 N8N_VERSION=$(curl -s https://registry.hub.docker.com/v2/repositories/n8nio/n8n/tags?page_size=100 \
@@ -104,31 +165,21 @@ log "Latest stable n8n: $N8N_VERSION"
 # ========================
 # User input
 # ========================
-prompt DOMAIN "Enter domain (or IP / local hostname)" "n8n.local"
+prompt DOMAIN "Enter domain / IP / local hostname" "n8n.local"
 prompt PORT "Enter n8n internal port" "5678"
 check_port "$PORT"
 
-# ========================
-# DNS readiness (non-fatal)
-# ========================
 check_dns "$DOMAIN" || true
 
 # ========================
-# Generate encryption key
+# Encryption key
 # ========================
 mkdir -p secrets
 if [ ! -f secrets/encryption_key.txt ]; then
   ENCRYPTION_KEY=$(generate_key)
   echo "$ENCRYPTION_KEY" > secrets/encryption_key.txt
   chmod 600 secrets/encryption_key.txt
-  log "🔐 Encryption key generated!"
-  echo ""
-  echo "⚠️  IMPORTANT:"
-  echo "   This encryption key is REQUIRED to migrate, restore backups,"
-  echo "   and decrypt credentials."
-  echo "   LOSS OF THIS KEY = DATA LOSS."
-  echo ""
-  echo "   Key saved in: secrets/encryption_key.txt"
+  log "🔐 Encryption key generated and saved."
 else
   ENCRYPTION_KEY=$(cat secrets/encryption_key.txt)
   log "Using existing encryption key."
@@ -156,24 +207,18 @@ sed -e "s|{{DOMAIN}}|$DOMAIN|g" \
 run "mv $TMP_DC docker-compose.yml"
 run "mv $TMP_CADDY Caddyfile"
 
-log "📄 Files generated: docker-compose.yml, Caddyfile"
+log "📄 Files generated."
 
 # ========================
-# Final output
+# Final
 # ========================
 echo ""
 echo "✅ Setup complete!"
 echo ""
-echo "📋 Next steps:"
-echo "   1. Start services:"
-echo "      docker compose up -d"
+echo "Next steps:"
+echo "  docker compose up -d"
 echo ""
-echo "   2. Check logs:"
-echo "      docker compose logs -f n8n caddy"
+echo "Access n8n at:"
+echo "  https://$DOMAIN"
 echo ""
-echo "   3. Access n8n at:"
-echo "      https://$DOMAIN"
-echo ""
-echo "🔒 Remember:"
-echo "   - Keep secrets/encryption_key.txt secure!"
-echo "   - Loss of encryption key = lost credentials."
+echo "Keep secrets/encryption_key.txt safe!"
