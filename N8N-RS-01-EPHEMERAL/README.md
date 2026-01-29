@@ -140,7 +140,7 @@ secrets/encryption_key.txt
 | Backups | ❌ | ✅ |
 | External DB (Postgres) | ❌ | ✅ |
 | Redis / Queue Mode | ❌ | ✅ |
-| High Availability | ❌	✅ |
+| High Availability | ❌	 | ✅ |
 | Large Team | ❌ | ✅ |
 | Compliance | ❌ | ✅ |
 | S3 Binary Storage | ❌ | ✅ |
