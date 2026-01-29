@@ -81,18 +81,19 @@ This stack deploys:
 ### 1️⃣ Requirements
 
 • Linux server / VM / home lab  
-• 2GB RAM minimum  
-• Docker installed  
+• 2GB RAM minimum 
 • Ports 80 & 443 open (if using public domain)  
 
 ---
 
 ### 2️⃣ Clone & Run Setup
 
+```bash
 git clone https://github.com/your-org/n8n-stage1.git
 cd n8n-stage1
 chmod +x setup.sh
 ./setup.sh
+```
 
 The script will:
 
@@ -170,9 +171,5 @@ Stage 1 is about speed and clarity:
 • Upgrade only when necessary
 
 This repo is intentionally opinionated and minimal — no premature complexity.
-
-## 📄 License
-
-MIT (or your preferred license)
 
 Happy automating 🚀
