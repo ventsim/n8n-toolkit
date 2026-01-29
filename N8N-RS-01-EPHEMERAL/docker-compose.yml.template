@@ -18,7 +18,7 @@ services:
     command: ["n8n", "start", "--port", "{{PORT}}"]
 
   caddy:
-    image: caddy:2
+    image: caddy:2-alpine
     restart: unless-stopped
     ports:
       - "80:80"
