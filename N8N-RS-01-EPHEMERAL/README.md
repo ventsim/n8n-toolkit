@@ -136,6 +136,7 @@ secrets/encryption_key.txt
 
 ## ⚙️ When to Upgrade (Decision Matrix)
 | Need | Stage 1 | Stage 2+ |
+|------|---------|----------|
 | Backups | ❌ | ✅ |
 | External DB (Postgres) | ❌ | ✅ |
 | Redis / Queue Mode | ❌ | ✅ |
