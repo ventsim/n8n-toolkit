@@ -171,5 +171,3 @@ Stage 1 is about speed and clarity:
 - Upgrade only when necessary
 
 This repo is intentionally opinionated and minimal — no premature complexity.
-
-Happy automating 🚀
