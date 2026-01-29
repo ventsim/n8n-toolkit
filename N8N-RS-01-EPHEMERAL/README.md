@@ -3,12 +3,12 @@
 This repository provides the **Stage 1 deployment pattern** for n8n: a lean, fast, and low-friction environment designed for **experimentation, prototyping, and early validation** of automation workflows.
 
 It is intentionally minimal:
-• Single node  
-• No external databases  
-• No Redis / queue mode  
-• No backups / HA  
-• No complex auth  
-• No cloud dependencies
+- Single node  
+- No external databases  
+- No Redis / queue mode  
+- No backups / HA  
+- No complex auth  
+- No cloud dependencies
 
 Just n8n + HTTPS + persistence — the fastest way to start shipping automations.
 
@@ -18,18 +18,18 @@ Just n8n + HTTPS + persistence — the fastest way to start shipping automations
 
 Use **Stage 1** when you want to:
 
-✔ Prototype automation ideas  
-✔ Validate business value of workflows  
-✔ Build internal tools fast  
-✔ Run experiments for 1–5 users  
-✔ Avoid infrastructure overhead  
+- Prototype automation ideas  
+- Validate business value of workflows  
+- Build internal tools fast  
+- Run experiments for 1–5 users  
+- Avoid infrastructure overhead  
 
 This is **not** intended for:
-• Mission-critical workflows  
-• Large teams  
-• Long-term production data  
-• High availability  
-• Regulated environments  
+- Mission-critical workflows  
+- Large teams  
+- Long-term production data  
+- High availability  
+- Regulated environments  
 
 For that → upgrade to **Stage 2+**
 
@@ -80,9 +80,9 @@ This stack deploys:
 
 ### 1️⃣ Requirements
 
-• Linux server / VM / home lab  
-• 2GB RAM minimum 
-• Ports 80 & 443 open (if using public domain)  
+- Linux server / VM / home lab  
+- 2GB RAM minimum 
+- Ports 80 & 443 open (if using public domain)  
 
 ---
 
@@ -97,12 +97,12 @@ chmod +x setup.sh
 
 The script will:
 
-✔ Detect latest stable n8n version
-✔ Ask for your domain / IP
-✔ Generate encryption key
-✔ Generate docker-compose.yml + Caddyfile
-✔ Validate DNS (if using public domain)
-✔ Prepare everything safely & idempotently
+- Detect latest stable n8n version
+- Ask for your domain / IP
+- Generate encryption key
+- Generate docker-compose.yml + Caddyfile
+- Validate DNS (if using public domain)
+- Prepare everything safely & idempotently
 
 ### 3️⃣ Start Services
 docker compose up -d
@@ -115,19 +115,19 @@ https://your-domain-or-ip
 
 
 You’ll be guided through the n8n UI onboarding:
-• Create admin user
-• Configure credentials
-• Start building workflows
+- Create admin user
+- Configure credentials
+- Start building workflows
 
 ## 🔐 Security Notes
 
-• n8n requires HTTPS — handled by Caddy
-• Your encryption key is generated and saved in:
+- n8n requires HTTPS — handled by Caddy
+- Your encryption key is generated and saved in:
 
 secrets/encryption_key.txt
 
 
-• Losing this key means:
+- Losing this key means:
 ❌ No credential recovery
 ❌ No safe migration
 ❌ No restore from backups
@@ -151,12 +151,12 @@ When you outgrow Stage 1, move to:
 
 👉 Stage 2 – Single Node Production Stack
 Includes:
-• PostgreSQL
-• Redis
-• Backups
-• Duplicati
-• Cron jobs
-• Better observability
+- PostgreSQL
+- Redis
+- Backups
+- Duplicati
+- Cron jobs
+- Better observability
 
 🔗 Stage 2 Repo:
 https://github.com/your-org/n8n-stage2 (replace later)
@@ -165,10 +165,10 @@ https://github.com/your-org/n8n-stage2 (replace later)
 
 Stage 1 is about speed and clarity:
 
-• Ship fast
-• Learn fast
-• Validate fast
-• Upgrade only when necessary
+- Ship fast
+- Learn fast
+- Validate fast
+- Upgrade only when necessary
 
 This repo is intentionally opinionated and minimal — no premature complexity.
 
