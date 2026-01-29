@@ -35,24 +35,17 @@ log "🚀 n8n Stage 1 Lean Setup Starting"
 # Distro detection
 # ========================
 detect_distro() {
-  if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    echo "$ID"
-  else
-    echo "unknown"
-  fi
+  if [ -f /etc/os-release ]; then . /etc/os-release; echo "$ID"; else echo "unknown"; fi
 }
-
 DISTRO=$(detect_distro)
 log "Detected distro: $DISTRO"
 
 # ========================
-# Install deps
+# Package install helpers
 # ========================
 install_pkg() {
   local pkg="$1"
   command -v "$pkg" >/dev/null 2>&1 && return 0
-
   log "Installing $pkg..."
   case "$DISTRO" in
     ubuntu|debian)
@@ -66,7 +59,7 @@ install_pkg() {
       run "sudo pacman -Sy --noconfirm $pkg"
       ;;
     *)
-      log "❌ Unsupported distro for auto-install: $DISTRO"
+      log "❌ Unsupported distro: $DISTRO"
       exit 1
       ;;
   esac
@@ -77,37 +70,46 @@ install_docker() {
     log "Docker already installed"
     return
   fi
-
   log "Installing Docker..."
-  case "$DISTRO" in
-    ubuntu|debian)
-      run "curl -fsSL https://get.docker.com | sudo sh"
-      ;;
-    rocky|almalinux|centos|rhel)
-      run "curl -fsSL https://get.docker.com | sudo sh"
-      ;;
-    arch)
-      run "sudo pacman -Sy --noconfirm docker"
-      run "sudo systemctl enable --now docker"
-      ;;
-    *)
-      log "❌ Docker install unsupported on $DISTRO"
-      exit 1
-      ;;
+  run "curl -fsSL https://get.docker.com | sudo sh"
+}
+
+install_compose_plugin() {
+  if docker compose version >/dev/null 2>&1; then
+    log "Docker Compose plugin already installed"
+    return
+  fi
+  log "Installing Docker Compose plugin..."
+  local ARCH
+  ARCH=$(uname -m)
+  case "$ARCH" in
+    x86_64) ARCH="x86_64" ;;
+    aarch64|arm64) ARCH="aarch64" ;;
+    *) log "❌ Unsupported arch: $ARCH"; exit 1 ;;
   esac
+
+  local DEST="/usr/local/lib/docker/cli-plugins"
+  run "sudo mkdir -p $DEST"
+  local URL
+  URL=$(curl -s https://api.github.com/repos/docker/compose/releases/latest \
+    | grep browser_download_url \
+    | grep "linux-$ARCH" \
+    | cut -d '"' -f 4)
+
+  [ -z "$URL" ] && { log "❌ Failed to detect Compose plugin URL"; exit 1; }
+
+  run "sudo curl -L $URL -o $DEST/docker-compose"
+  run "sudo chmod +x $DEST/docker-compose"
 }
 
 # ========================
-# Install dependencies
+# Ensure dependencies
 # ========================
 log "🔧 Ensuring dependencies..."
-
-for dep in curl awk sed grep getent openssl; do
-  install_pkg "$dep"
-done
-
+for dep in curl awk sed grep getent openssl; do install_pkg "$dep"; done
 install_docker
 run "sudo systemctl enable --now docker || true"
+install_compose_plugin
 
 # ========================
 # Helpers
@@ -143,8 +145,7 @@ check_dns() {
   local ip
   ip=$(getent hosts "$host" | awk '{print $1}' || true)
   if [ -z "$ip" ]; then
-    echo "⚠️  DNS for $host not resolving yet."
-    echo "➡ Public HTTPS will work once DNS points here."
+    log "⚠️  DNS for $host not resolving yet (OK for local use)"
     return 1
   fi
   log "DNS OK: $host resolves to $ip"
@@ -168,7 +169,6 @@ log "Latest stable n8n: $N8N_VERSION"
 prompt DOMAIN "Enter domain / IP / local hostname" "n8n.local"
 prompt PORT "Enter n8n internal port" "5678"
 check_port "$PORT"
-
 check_dns "$DOMAIN" || true
 
 # ========================
@@ -179,10 +179,10 @@ if [ ! -f secrets/encryption_key.txt ]; then
   ENCRYPTION_KEY=$(generate_key)
   echo "$ENCRYPTION_KEY" > secrets/encryption_key.txt
   chmod 600 secrets/encryption_key.txt
-  log "🔐 Encryption key generated and saved."
+  log "🔐 Encryption key generated and saved"
 else
   ENCRYPTION_KEY=$(cat secrets/encryption_key.txt)
-  log "Using existing encryption key."
+  log "Using existing encryption key"
 fi
 
 # ========================
@@ -207,7 +207,31 @@ sed -e "s|{{DOMAIN}}|$DOMAIN|g" \
 run "mv $TMP_DC docker-compose.yml"
 run "mv $TMP_CADDY Caddyfile"
 
-log "📄 Files generated."
+# ========================
+# Start stack
+# ========================
+log "▶ Starting n8n stack..."
+run "docker compose up -d"
+
+# ========================
+# Health check
+# ========================
+log "⏳ Waiting for n8n to become healthy..."
+for i in {1..30}; do
+  if docker compose ps | grep -q "n8n.*Up"; then
+    log "✅ n8n container is running"
+    break
+  fi
+  sleep 2
+done
+
+log "🔍 Validating HTTPS endpoint..."
+sleep 5
+if curl -sk "https://$DOMAIN" | grep -qi n8n; then
+  log "✅ n8n UI reachable at https://$DOMAIN"
+else
+  log "⚠️  n8n UI not yet reachable – check logs"
+fi
 
 # ========================
 # Final
@@ -215,10 +239,10 @@ log "📄 Files generated."
 echo ""
 echo "✅ Setup complete!"
 echo ""
-echo "Next steps:"
-echo "  docker compose up -d"
-echo ""
 echo "Access n8n at:"
 echo "  https://$DOMAIN"
+echo ""
+echo "Check logs:"
+echo "  docker compose logs -f n8n caddy"
 echo ""
 echo "Keep secrets/encryption_key.txt safe!"
