@@ -153,7 +153,6 @@ When you outgrow Stage 1, move to:
 👉 Stage 2 – Single Node Production Stack
 Includes:
 - PostgreSQL
-- Redis
 - Backups
 - Duplicati
 - Cron jobs

@@ -1,0 +1,41 @@
+version: "3.8"
+
+services:
+  n8n:
+    image: n8nio/n8n:{{N8N_VERSION}}
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:{{PORT}}:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE={{BASIC_AUTH}}
+      - N8N_BASIC_AUTH_USER={{BASIC_USER}}
+      - N8N_BASIC_AUTH_PASSWORD={{BASIC_PASS}}
+      - N8N_ENCRYPTION_KEY={{ENCRYPTION_KEY}}
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_PERSONALIZATION_ENABLED=false
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - n8n_network
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=file:/etc/cloudflared/token/token.txt
+    volumes:
+      - ./tunnel_token.txt:/etc/cloudflared/token/token.txt:ro
+    depends_on:
+      - n8n
+    networks:
+      - n8n_network
+
+volumes:
+  n8n_data:
+
+networks:
+  n8n_network:
+    driver: bridge
