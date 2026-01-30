@@ -1,36 +1,41 @@
 services:
   n8n:
-    image: n8nio/n8n:{{N8N_VERSION}}
+    image: n8nio/n8n:${N8N_VERSION}
+    container_name: n8n
     restart: unless-stopped
+    user: "1000:1000"
     environment:
-      - N8N_HOST={{DOMAIN}}
+      - N8N_HOST=${DOMAIN}
       - N8N_PORT=443
       - N8N_PROTOCOL=https
-      - WEBHOOK_URL=https://{{DOMAIN}}/
+      - WEBHOOK_URL=https://${DOMAIN}/
       - N8N_PROXY_HOPS=1
       - EXECUTIONS_TIMEOUT=3600
       - EXECUTIONS_TIMEOUT_MAX=7200
-      - N8N_ENCRYPTION_KEY={{ENCRYPTION_KEY}}
+      - N8N_ENCRYPTION_KEY=${ENCRYPTION_KEY}
     volumes:
-      - n8n_data:/home/node/.n8n
+      - ./data/n8n:/home/node/.n8n
     expose:
-      - "{{PORT}}"
-    command: ["n8n", "start", "--port", "{{PORT}}"]
+      - "${PORT}"
+    command: ["n8n", "start", "--port", "${PORT}"]
 
   caddy:
-    image: caddy:2.11-alpine
+    image: caddy:2
+    container_name: caddy
     restart: unless-stopped
+    depends_on:
+      - n8n
     ports:
       - "80:80"
       - "443:443"
     volumes:
+      # Caddyfile from your repo
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+      # Persistent Caddy TLS + config data
       - caddy_data:/data
       - caddy_config:/config
-    depends_on:
-      - n8n
 
 volumes:
-  n8n_data:
   caddy_data:
   caddy_config:
