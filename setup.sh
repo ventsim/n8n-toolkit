@@ -214,31 +214,32 @@ else
 fi
 
 # ========================
+# Generate .env
+# ========================
+cat > .env <<EOF
+DOMAIN=$DOMAIN
+PORT=$PORT
+N8N_VERSION=$N8N_VERSION
+ENCRYPTION_KEY=$ENCRYPTION_KEY
+UID=$(id -u)
+GID=$(id -g)
+EOF
+
+log "📄 .env file written"
+
+# ========================
 # Templates
 # ========================
 [ -f docker-compose.yml.template ] || { log "❌ docker-compose.yml.template missing"; exit 1; }
 [ -f Caddyfile.template ] || { log "❌ Caddyfile.template missing"; exit 1; }
 
-TMP_DC=$(mktemp)
-TMP_CADDY=$(mktemp)
-
-sed -e "s|{{N8N_VERSION}}|$N8N_VERSION|g" \
-    -e "s|{{PORT}}|$PORT|g" \
-    -e "s|{{DOMAIN}}|$DOMAIN|g" \
-    -e "s|{{ENCRYPTION_KEY}}|$ENCRYPTION_KEY|g" \
-    docker-compose.yml.template > "$TMP_DC"
-
-sed -e "s|{{DOMAIN}}|$DOMAIN|g" \
-    -e "s|{{PORT}}|$PORT|g" \
-    Caddyfile.template > "$TMP_CADDY"
-
-run "mv $TMP_DC docker-compose.yml"
-run "mv $TMP_CADDY Caddyfile"
+run "cp docker-compose.yml.template docker-compose.yml"
+run "cp Caddyfile.template Caddyfile"
 
 # ========================
 # Start stack
 # ========================
-log "▶ Starting n8n stack..."
+log "▶ Starting stack..."
 run "docker compose up -d"
 
 # ========================
