@@ -5,33 +5,11 @@ LOG_FILE="setup.log"
 OLD_LOG_FILE="setup.log.prev"
 DRY_RUN=false
 NON_INTERACTIVE=false
-SETUP_FAILED=false
 
-# Cleanup function
-cleanup() {
-  rm -f "$TMP_DC" "$TMP_CADDY" 2>/dev/null || true
-}
-
-# Error handling
-trap 'SETUP_FAILED=true; setup_cleanup' ERR
-trap cleanup EXIT INT TERM
-
-setup_cleanup() {
-  if $SETUP_FAILED; then
-    log "❌ Setup failed. Performing cleanup..."
-    run "docker compose down --volumes --remove-orphans 2>/dev/null || true"
-  fi
-  cleanup
-}
-
-trap setup_cleanup ERR
-
-VERSION=""
 for arg in "$@"; do
   case $arg in
     --dry-run) DRY_RUN=true ;;
     --non-interactive) NON_INTERACTIVE=true ;;
-    --version=*) VERSION="${arg#*=}" ;;
   esac
 done
 
@@ -97,16 +75,9 @@ install_docker() {
 }
 
 install_compose_plugin() {
-  # Check for docker compose V2 (plugin)
   if docker compose version >/dev/null 2>&1; then
     log "Docker Compose plugin already installed"
     return
-  fi
-  
-  # Check for docker-compose V1 (standalone)
-  if command -v docker-compose >/dev/null 2>&1; then
-    log "docker-compose V1 detected - installing V2 plugin..."
-    # Optionally remove V1 and install V2
   fi
   log "Installing Docker Compose plugin..."
   local ARCH
@@ -131,26 +102,6 @@ install_compose_plugin() {
   run "sudo chmod +x $DEST/docker-compose"
 }
 
-detect_n8n_version_official() {
-    # Try n8n's update endpoint
-    local version
-    version=$(curl -s "https://static.n8n.io/releases/versions.json" \
-        | grep -o '"latest":"[0-9]\+\.[0-9]\+\.[0-9]\+"' \
-        | cut -d'"' -f4 2>/dev/null)
-    
-    if [ -n "$version" ]; then
-        echo "$version"
-        return 0
-    fi
-    
-    # Fallback to GitHub API with better error handling
-    version=$(curl -s \
-        -H "Accept: application/vnd.github.v3+json" \
-        "https://api.github.com/repos/n8n-io/n8n/releases/latest" \
-        2>/dev/null | jq -r '.tag_name' 2>/dev/null | sed 's/^v//')
-    
-    echo "$version"
-}
 # ========================
 # Ensure dependencies
 # ========================
@@ -201,7 +152,6 @@ check_port() {
   fi
 }
 
-
 check_dns() {
   local host="$1"
   log "Checking DNS for $host..."
@@ -214,8 +164,9 @@ check_dns() {
   log "DNS OK: $host resolves to $ip"
 }
 # ========================
-# Add current user to docker group if not already added
+# Ensure docker group access
 # ========================
+
 if ! groups "$USER" | grep -q '\bdocker\b'; then
   log "User $USER is not in docker group"
   log "Adding $USER to docker group..."
@@ -227,11 +178,15 @@ if ! groups "$USER" | grep -q '\bdocker\b'; then
   echo "➡ Then re-run this script."
   exit 0
 fi
+
 # ========================
 # Detect latest n8n
 # ========================
 log "🔎 Detecting latest stable n8n version..."
-N8N_VERSION=$(detect_n8n_version_official)
+N8N_VERSION=$(curl -s https://registry.hub.docker.com/v2/repositories/n8nio/n8n/tags?page_size=100 \
+  | grep -oE '"name":"[0-9]+\.[0-9]+\.[0-9]+"' \
+  | sed 's/"name":"//;s/"//' \
+  | sort -Vr | head -n1)
 
 [ -z "$N8N_VERSION" ] && { log "❌ Could not detect n8n version"; exit 1; }
 log "Latest stable n8n: $N8N_VERSION"
@@ -279,6 +234,7 @@ sed -e "s|{{DOMAIN}}|$DOMAIN|g" \
 
 run "mv $TMP_DC docker-compose.yml"
 run "mv $TMP_CADDY Caddyfile"
+
 # ========================
 # Start stack
 # ========================
