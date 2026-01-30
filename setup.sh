@@ -155,10 +155,12 @@ check_dns() {
 # Detect latest n8n
 # ========================
 log "🔎 Detecting latest stable n8n version..."
-N8N_VERSION=$(curl -s https://registry.hub.docker.com/v2/repositories/n8nio/n8n/tags?page_size=100 \
-  | grep -oE '"name":"[0-9]+\.[0-9]+\.[0-9]+"' \
-  | sed 's/"name":"//;s/"//' \
-  | sort -Vr | head -n1)
+N8N_VERSION= "2.1.2"
+
+# $(curl -s https://registry.hub.docker.com/v2/repositories/n8nio/n8n/tags?page_size=100 \
+#  | grep -oE '"name":"[0-9]+\.[0-9]+\.[0-9]+"' \
+#  | sed 's/"name":"//;s/"//' \
+#  | sort -Vr | head -n1)
 
 [ -z "$N8N_VERSION" ] && { log "❌ Could not detect n8n version"; exit 1; }
 log "Latest stable n8n: $N8N_VERSION"
