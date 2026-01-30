@@ -5,11 +5,33 @@ LOG_FILE="setup.log"
 OLD_LOG_FILE="setup.log.prev"
 DRY_RUN=false
 NON_INTERACTIVE=false
+SETUP_FAILED=false
 
+# Cleanup function
+cleanup() {
+  rm -f "$TMP_DC" "$TMP_CADDY" 2>/dev/null || true
+}
+
+# Error handling
+trap 'SETUP_FAILED=true; setup_cleanup' ERR
+trap cleanup EXIT INT TERM
+
+setup_cleanup() {
+  if $SETUP_FAILED; then
+    log "❌ Setup failed. Performing cleanup..."
+    run "docker compose down --volumes --remove-orphans 2>/dev/null || true"
+  fi
+  cleanup
+}
+
+trap setup_cleanup ERR
+
+VERSION=""
 for arg in "$@"; do
   case $arg in
     --dry-run) DRY_RUN=true ;;
     --non-interactive) NON_INTERACTIVE=true ;;
+    --version=*) VERSION="${arg#*=}" ;;
   esac
 done
 
@@ -75,9 +97,16 @@ install_docker() {
 }
 
 install_compose_plugin() {
+  # Check for docker compose V2 (plugin)
   if docker compose version >/dev/null 2>&1; then
     log "Docker Compose plugin already installed"
     return
+  fi
+  
+  # Check for docker-compose V1 (standalone)
+  if command -v docker-compose >/dev/null 2>&1; then
+    log "docker-compose V1 detected - installing V2 plugin..."
+    # Optionally remove V1 and install V2
   fi
   log "Installing Docker Compose plugin..."
   local ARCH
@@ -102,6 +131,26 @@ install_compose_plugin() {
   run "sudo chmod +x $DEST/docker-compose"
 }
 
+detect_n8n_version_official() {
+    # Try n8n's update endpoint
+    local version
+    version=$(curl -s "https://static.n8n.io/releases/versions.json" \
+        | grep -o '"latest":"[0-9]\+\.[0-9]\+\.[0-9]\+"' \
+        | cut -d'"' -f4 2>/dev/null)
+    
+    if [ -n "$version" ]; then
+        echo "$version"
+        return 0
+    fi
+    
+    # Fallback to GitHub API with better error handling
+    version=$(curl -s \
+        -H "Accept: application/vnd.github.v3+json" \
+        "https://api.github.com/repos/n8n-io/n8n/releases/latest" \
+        2>/dev/null | jq -r '.tag_name' 2>/dev/null | sed 's/^v//')
+    
+    echo "$version"
+}
 # ========================
 # Ensure dependencies
 # ========================
@@ -129,15 +178,29 @@ prompt() {
   fi
 }
 
-generate_key() { openssl rand -hex 32; }
+generate_key() {
+  # Generate 32 random bytes, base64 encode = ~43 characters
+  openssl rand -base64 32 | tr -d '\n' | head -c 32
+}
 
 check_port() {
-  local p="$1"
-  if ! [[ "$p" =~ ^[0-9]+$ ]] || [ "$p" -lt 1024 ] || [ "$p" -gt 65535 ]; then
-    log "⚠️  Port invalid. Using default 5678."
-    PORT=5678
+  local port="$1"
+  if ss -tuln | grep -q ":$port "; then
+    log "❌ Port $port is already in use"
+    if $NON_INTERACTIVE; then
+      exit 1
+    else
+      while true; do
+        read -rp "Choose another port (1024-65535): " new_port
+        if [[ "$new_port" =~ ^[0-9]+$ ]] && [ "$new_port" -ge 1024 ] && [ "$new_port" -le 65535 ]; then
+          PORT="$new_port"
+          break
+        fi
+      done
+    fi
   fi
 }
+
 
 check_dns() {
   local host="$1"
@@ -150,17 +213,25 @@ check_dns() {
   fi
   log "DNS OK: $host resolves to $ip"
 }
+# ========================
+# Add current user to docker group if not already added
+# ========================
+if ! groups "$USER" | grep -q '\bdocker\b'; then
+  log "User $USER is not in docker group"
+  log "Adding $USER to docker group..."
+  sudo usermod -aG docker "$USER"
 
+  echo ""
+  echo "⚠️  You have been added to the docker group."
+  echo "➡ You must log out and back in (or run: newgrp docker)"
+  echo "➡ Then re-run this script."
+  exit 0
+fi
 # ========================
 # Detect latest n8n
 # ========================
 log "🔎 Detecting latest stable n8n version..."
-N8N_VERSION= "2.1.2"
-
-# $(curl -s https://registry.hub.docker.com/v2/repositories/n8nio/n8n/tags?page_size=100 \
-#  | grep -oE '"name":"[0-9]+\.[0-9]+\.[0-9]+"' \
-#  | sed 's/"name":"//;s/"//' \
-#  | sort -Vr | head -n1)
+N8N_VERSION=$(detect_n8n_version_official)
 
 [ -z "$N8N_VERSION" ] && { log "❌ Could not detect n8n version"; exit 1; }
 log "Latest stable n8n: $N8N_VERSION"
@@ -208,7 +279,6 @@ sed -e "s|{{DOMAIN}}|$DOMAIN|g" \
 
 run "mv $TMP_DC docker-compose.yml"
 run "mv $TMP_CADDY Caddyfile"
-
 # ========================
 # Start stack
 # ========================
@@ -219,21 +289,26 @@ run "docker compose up -d"
 # Health check
 # ========================
 log "⏳ Waiting for n8n to become healthy..."
-for i in {1..30}; do
-  if docker compose ps | grep -q "n8n.*Up"; then
-    log "✅ n8n container is running"
+for i in {1..60}; do
+  # Check the health endpoint directly
+  if curl -f -s http://localhost:$PORT/healthz >/dev/null 2>&1; then
+    log "✅ n8n health check passed"
     break
+  fi
+  if [ $i -eq 30 ]; then
+    log "⚠️  n8n starting slowly, continuing to wait..."
   fi
   sleep 2
 done
 
-log "🔍 Validating HTTPS endpoint..."
-sleep 5
-if curl -sk "https://$DOMAIN" | grep -qi n8n; then
-  log "✅ n8n UI reachable at https://$DOMAIN"
-else
-  log "⚠️  n8n UI not yet reachable – check logs"
-fi
+# Also check Caddy
+for i in {1..30}; do
+  if curl -k -f -s https://$DOMAIN/healthz >/dev/null 2>&1; then
+    log "✅ Caddy proxy working"
+    break
+  fi
+  sleep 2
+done
 
 # ========================
 # Final
