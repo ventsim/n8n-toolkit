@@ -237,6 +237,21 @@ run "cp docker-compose.yml.template docker-compose.yml"
 run "cp Caddyfile.template Caddyfile"
 
 # ========================
+# Ensure data directories & permissions
+# ========================
+log "📁 Ensuring persistent data directories..."
+
+mkdir -p data/n8n data/caddy data/caddy-config logs
+
+log "🔐 Fixing ownership on data directories..."
+run "sudo chown -R $(id -u):$(id -g) data logs"
+
+log "🧪 Verifying write access..."
+touch data/n8n/.perm_test && rm data/n8n/.perm_test
+
+log "✅ Data directories ready"
+
+# ========================
 # Start stack
 # ========================
 log "▶ Starting stack..."

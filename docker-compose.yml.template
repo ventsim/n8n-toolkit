@@ -3,7 +3,7 @@ services:
     image: n8nio/n8n:${N8N_VERSION}
     container_name: n8n
     restart: unless-stopped
-    user: "1000:1000"
+    user:"${UID}:${GID}"
     environment:
       - N8N_HOST=${DOMAIN}
       - N8N_PORT=443
