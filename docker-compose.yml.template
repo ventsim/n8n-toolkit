@@ -17,7 +17,6 @@ services:
       - ./data/n8n:/home/node/.n8n
     expose:
       - "${PORT}"
-    command: ["n8n", "start", "--port", "${PORT}"]
 
   caddy:
     image: caddy:2
