@@ -234,7 +234,15 @@ log "📄 .env file written"
 [ -f Caddyfile.template ] || { log "❌ Caddyfile.template missing"; exit 1; }
 
 run "cp docker-compose.yml.template docker-compose.yml"
-run "cp Caddyfile.template Caddyfile"
+
+TMP_CADDY=$(mktemp)
+
+sed -e "s|{{DOMAIN}}|$DOMAIN|g" \
+    -e "s|{{PORT}}|$PORT|g" \
+    Caddyfile.template > "$TMP_CADDY"
+
+run "mv $TMP_CADDY Caddyfile"
+
 
 # ========================
 # Ensure data directories & permissions
