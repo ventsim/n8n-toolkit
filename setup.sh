@@ -529,38 +529,42 @@ if [[ "$DOMAIN" == *.local ]] || [[ "$DOMAIN" == *localhost* ]]; then
 fi
 
 # ========================
-# Final output with styling
+# Final output with styling - CLEANEST FIX
 # ========================
 if command -v gum >/dev/null 2>&1; then
   clear
+  
+  # Header
   gum style \
     --foreground 46 --border-foreground 46 --border double \
     --align center --width 70 --margin "1 2" --padding "2 4" \
     '✅ n8n DEPLOYMENT COMPLETE' \
     'Your automation platform is ready!'
   
+  # URLs section
   echo ""
   gum style --foreground 212 --bold "🔗 ACCESS URLs"
   echo ""
   
-  gum style --foreground 255 --background 24 --padding "0 2" --margin "0 1" \
-    "🌐 Primary Domain: " --foreground 39 --bold "https://$DOMAIN"
+  # Create a formatted table for URLs
+  {
+    echo "🌐 Primary Domain:;https://$DOMAIN"
+    if [ "$SETUP_LOCALHOST" = "true" ]; then
+      echo "💻 Local Access:;https://localhost.n8n"
+    fi
+    echo "🔧 Direct Access:;http://localhost:$PORT"
+  } | column -t -s ';' | gum format
   
   if [ "$SETUP_LOCALHOST" = "true" ]; then
-    gum style --foreground 255 --background 24 --padding "0 2" --margin "1 1" \
-      "💻 Local Access:    " --foreground 39 --bold "https://localhost.n8n"
-    gum style --foreground 214 --margin "0 1" \
-      "   Note: Accept the self-signed certificate warning"
+    gum style --foreground 214 --italic "   Note: Accept the self-signed certificate warning for localhost.n8n"
   fi
   
-  gum style --foreground 255 --background 24 --padding "0 2" --margin "1 1" \
-    "🔧 Direct Access:   " --foreground 39 --bold "http://localhost:$PORT"
-  
+  # Commands section
   echo ""
   gum style --foreground 212 --bold "⚙️  MANAGEMENT COMMANDS"
   echo ""
   
-  cat <<EOF | gum format -t code
+  cat << 'EOF' | gum format -t code
 # View logs
 docker compose logs -f n8n
 docker compose logs -f caddy
@@ -580,21 +584,27 @@ docker compose pull n8n
 docker compose up -d
 EOF
   
+  # Files section
   echo ""
   gum style --foreground 212 --bold "🔐 IMPORTANT FILES"
   echo ""
-  gum style --foreground 250 "• .env - Configuration file"
-  gum style --foreground 250 "• secrets/encryption_key.txt - Encryption key (KEEP SAFE!)"
-  gum style --foreground 250 "• Caddyfile - Reverse proxy configuration"
+  printf "• .env - Configuration file\n• secrets/encryption_key.txt - Encryption key\n• Caddyfile - Reverse proxy config\n" | gum format
   
+  # Troubleshooting
   echo ""
   gum style --foreground 214 --bold "⚠️  TROUBLESHOOTING"
-  gum style --foreground 250 "If you can't access n8n:"
-  gum style --foreground 250 "• Check firewall: sudo ufw allow 80,443"
-  gum style --foreground 250 "• Verify /etc/hosts entries"
-  gum style --foreground 250 "• Check logs: docker compose logs"
+  printf "If you can't access n8n:\n• Check firewall: sudo ufw allow 80,443\n• Verify /etc/hosts entries\n• Check logs: docker compose logs\n" | gum format
+  
+  # SSL warning for local domains
+  if [[ "$DOMAIN" =~ \.local$ ]] || [[ "$DOMAIN" == *localhost* ]]; then
+    echo ""
+    gum style --foreground 196 --bold "🔒 SSL NOTE"
+    gum style --foreground 250 "Your browser will show a security warning because $DOMAIN uses a self-signed certificate."
+    gum style --foreground 250 "This is normal for local development. Click 'Advanced' → 'Proceed' to continue."
+  fi
   
 else
+  # Fallback without gum
   echo ""
   echo "✅ Setup complete!"
   echo ""
@@ -603,9 +613,18 @@ else
   if [ "$SETUP_LOCALHOST" = "true" ]; then
     echo "  https://localhost.n8n (accept self-signed cert)"
   fi
+  echo "  http://localhost:$PORT (direct access)"
   echo ""
   echo "Check logs:"
   echo "  docker compose logs -f n8n caddy"
   echo ""
   echo "Keep secrets/encryption_key.txt safe!"
+  
+  # SSL warning
+  if [[ "$DOMAIN" =~ \.local$ ]] || [[ "$DOMAIN" == *localhost* ]]; then
+    echo ""
+    echo "🔒 SSL NOTE: Your browser will show a security warning because"
+    echo "   $DOMAIN uses a self-signed certificate. This is normal."
+    echo "   Click 'Advanced' → 'Proceed' to continue."
+  fi
 fi
