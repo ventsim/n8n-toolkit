@@ -271,7 +271,7 @@ run "docker compose up -d"
 log "⏳ Waiting for n8n to become healthy..."
 for i in {1..60}; do
   # Check the health endpoint directly
-  if curl -f -s http://localhost:$PORT/healthz >/dev/null 2>&1; then
+  if curl -f -s http://$DOMAIN:$PORT/healthz >/dev/null 2>&1; then
     log "✅ n8n health check passed"
     break
   fi

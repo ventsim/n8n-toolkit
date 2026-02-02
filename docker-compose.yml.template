@@ -6,7 +6,7 @@ services:
     user: "${UID}:${GID}"
     environment:
       N8N_HOST: ${DOMAIN}
-      N8N_PORT: "443"
+      N8N_PORT: ${PORT}
       N8N_PROTOCOL: ${PORT}
       WEBHOOK_URL: https://${DOMAIN}/
       N8N_PROXY_HOPS: "1"
