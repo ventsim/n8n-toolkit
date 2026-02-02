@@ -19,7 +19,7 @@ services:
       - "${PORT}"
 
   caddy:
-    image: caddy:2
+    image: caddy:2-alpine
     container_name: caddy
     restart: unless-stopped
     depends_on:
