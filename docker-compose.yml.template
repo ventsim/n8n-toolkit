@@ -7,7 +7,7 @@ services:
     environment:
       N8N_HOST: ${DOMAIN}
       N8N_PORT: "443"
-      N8N_PROTOCOL: https
+      N8N_PROTOCOL: ${PORT}
       WEBHOOK_URL: https://${DOMAIN}/
       N8N_PROXY_HOPS: "1"
       EXECUTIONS_TIMEOUT: "3600"
