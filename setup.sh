@@ -37,7 +37,7 @@ elif check_n8n_exposed; then
 else
     # Check if n8n container is at least running
     if docker ps | grep -q "n8n.*Up"; then
-        log "⚠️  n8n container is running but health check failing"
+        log "⚠️  n8n container is running but health check failing."
         log "This may be normal - n8n might still be initializing"
     else
         log "❌ n8n container is not running"
