@@ -529,7 +529,7 @@ if [[ "$DOMAIN" == *.local ]] || [[ "$DOMAIN" == *localhost* ]]; then
 fi
 
 # ========================
-# Final output with styling - CLEANEST FIX
+# Final output with styling
 # ========================
 if command -v gum >/dev/null 2>&1; then
   clear
