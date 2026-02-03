@@ -541,6 +541,10 @@ docker compose down
 # Update n8n
 docker compose pull n8n
 docker compose up -d
+
+# Remove the entire stack
+docker compose down
+cd ~ && sudo rm -rf n8n-toolkit
 EOF
   
   # Files section

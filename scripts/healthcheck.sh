@@ -1,1 +1,0 @@
-curl -fs http://localhost:5678/healthz || exit 1
