@@ -517,7 +517,7 @@ if command -v gum >/dev/null 2>&1; then
   } | column -t -s ';' | gum format
   
   if [ "$SETUP_LOCALHOST" = "true" ]; then
-    gum style --foreground 214 --italic "   Note: Accept the self-signed certificate warning for localhost.n8n"
+    gum style --foreground 214 --italic "Note - Accept the self-signed certificate warning for localhost.n8n"
   fi
   
   # Commands section
