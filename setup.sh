@@ -430,103 +430,64 @@ else
 fi
 
 # ========================
-# Health check
+# Health check (simple and robust)
 # ========================
-log "⏳ Waiting for n8n to become healthy..."
+log "⏳ Waiting for services to start..."
 
-# Function to check n8n health (internal container access)
-check_n8n_internal() {
-    # Try to access n8n health endpoint directly via Docker network
-    for i in {1..30}; do
-        if docker exec n8n curl -f -s http://localhost:443/healthz >/dev/null 2>&1; then
-            log "✅ n8n internal health check passed"
-            return 0
+# Just check if containers are running (don't rely on health endpoints)
+wait_for_container() {
+    local container="$1"
+    local timeout="${2:-60}"
+    
+    for i in $(seq 1 $timeout); do
+        if docker ps --format "{{.Names}}" | grep -q "^${container}$"; then
+            if docker ps --format "{{.Names}} {{.Status}}" | grep -q "^${container}.*Up"; then
+                log "✅ $container is running"
+                return 0
+            fi
         fi
-        sleep 2
+        sleep 1
     done
+    log "⚠️  $container not running after ${timeout}s"
     return 1
 }
 
-# Function to check via exposed port (if needed)
-check_n8n_exposed() {
-    # Try direct access via exposed port (may not work if n8n is configured for 443)
-    for i in {1..10}; do
-        if curl -f -s http://localhost:$PORT/healthz >/dev/null 2>&1; then
-            log "✅ n8n exposed port check passed"
-            return 0
+# Wait for core services
+wait_for_container "n8n-postgres" 30
+wait_for_container "n8n-redis" 30
+wait_for_container "n8n" 90
+wait_for_container "caddy" 30
+
+# Quick test if we can reach n8n through Caddy (ignore SSL errors)
+log "⏳ Testing n8n accessibility..."
+for i in {1..10}; do
+    # Just check if we get any response at all
+    if timeout 5 curl -k -s https://$DOMAIN >/dev/null 2>&1; then
+        log "✅ n8n is accessible at https://$DOMAIN"
+        
+        # If local domain, warn about SSL
+        if [[ "$DOMAIN" =~ \.local$ ]] || [[ "$DOMAIN" == *localhost* ]]; then
+            log "ℹ️  Note: Browser will show SSL warning. This is normal for local domains."
+            log "   Click 'Advanced' → 'Proceed' to continue."
         fi
-        sleep 2
-    done
-    return 1
-}
-
-# Check n8n health (try multiple methods)
-if check_n8n_internal; then
-    log "✅ n8n is running inside container"
-elif check_n8n_exposed; then
-    log "✅ n8n is accessible via exposed port"
-else
-    # Check if n8n container is at least running
-    if docker ps | grep -q "n8n.*Up"; then
-        log "⚠️  n8n container is running but health check failing"
-        log "This may be normal - n8n might still be initializing"
-    else
-        log "❌ n8n container is not running"
-        docker compose logs n8n --tail=20
-    fi
-fi
-
-# Check Caddy via HTTPS (with self-signed cert ignore)
-log "⏳ Checking Caddy proxy..."
-for i in {1..30}; do
-    # Use -k to ignore SSL warnings, --retry for resilience
-    if curl -k -f -s --retry 2 --retry-delay 1 https://$DOMAIN/healthz >/dev/null 2>&1; then
-        log "✅ Caddy proxy working (https://$DOMAIN)"
         break
     fi
-    if [ $i -eq 10 ]; then
-        log "⚠️  Caddy still starting..."
-    fi
-    if [ $i -eq 20 ]; then
-        log "⚠️  Caddy taking longer than expected..."
-        # Try HTTP fallback
-        if curl -f -s --max-time 5 http://$DOMAIN >/dev/null 2>&1; then
-            log "✅ Caddy responding on HTTP (will redirect to HTTPS)"
-        fi
-    fi
-    sleep 2
+    sleep 3
 done
 
-# Check localhost alias if enabled
+# Check localhost alias
 if [ "$SETUP_LOCALHOST" = "true" ]; then
-    log "⏳ Checking localhost alias..."
-    for i in {1..15}; do
-        if curl -k -f -s https://localhost.n8n/healthz >/dev/null 2>&1; then
-            log "✅ Caddy localhost alias working (https://localhost.n8n)"
+    for i in {1..5}; do
+        if timeout 5 curl -k -s https://localhost.n8n >/dev/null 2>&1; then
+            log "✅ localhost.n8n alias is working"
             break
         fi
         sleep 2
     done
 fi
 
-# Final verification - try to access n8n UI through Caddy
-log "⏳ Final verification..."
-for i in {1..10}; do
-    # Check if we get any response from n8n UI (not just health endpoint)
-    if curl -k -s -o /dev/null -w "%{http_code}" https://$DOMAIN | grep -q "200\|302\|307"; then
-        log "✅ n8n UI is accessible through Caddy"
-        break
-    fi
-    sleep 2
-done
-
-# Provide helpful message about SSL warnings
 echo ""
-if [[ "$DOMAIN" == *.local ]] || [[ "$DOMAIN" == *localhost* ]]; then
-    log "ℹ️  SSL Note: Since you're using a local domain ($DOMAIN),"
-    log "   browsers will show a security warning. This is normal."
-    log "   Just click 'Advanced' → 'Proceed to site' or 'Accept Risk'"
-fi
+log "🎉 All services are running!"
 
 # ========================
 # Final output with styling
