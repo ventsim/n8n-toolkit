@@ -453,8 +453,6 @@ wait_for_container() {
 }
 
 # Wait for core services
-wait_for_container "n8n-postgres" 30
-wait_for_container "n8n-redis" 30
 wait_for_container "n8n" 90
 wait_for_container "caddy" 30
 
