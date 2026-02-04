@@ -39,12 +39,13 @@ log_error() {
 }
 
 ui_header() {
-  command -v gum >/dev/null || return
-  clear
-  gum style \
+ if command -v gum >/dev/null 2>&1; then
+    clear
+    gum style \
     --foreground $THEME_FG --border-foreground $THEME_BORDER --border double \
     --align center --width 70 --margin "1 2" --padding "2 4" \
     "$1" "$2"
+ fi
 }
 
 ui_spin() {
@@ -61,5 +62,17 @@ ui_confirm() {
   else
     read -rp "$1 [Y/n]: " r
     [[ "${r:-Y}" =~ ^[Yy]$ ]]
+  fi
+}
+
+prompt() {
+  local var="$1" text="$2" def="$3"
+  if command -v gum >/dev/null 2>&1; then
+    local val
+    val=$(gum input --prompt "$text: " --value "$def")
+    eval "$var=\"${val:-$def}\""
+  else
+    read -rp "$text [$def]: " val
+    eval "$var=\"${val:-$def}\""
   fi
 }
