@@ -121,16 +121,19 @@ render_final_page() {
   local tmp_file
   tmp_file=$(mktemp)
 
-  sed -e "s|{{DOMAIN}}|$DOMAIN|g" \
-      -e "s|{{PORT}}|$PORT|g" \
+  sed -e "s|{{DOMAIN}}|${DOMAIN:=unknown}|g" \
+      -e "s|{{PORT}}|${PORT:=unknown}|g" \
       final.md > "$tmp_file"
 
   if command -v gum >/dev/null 2>&1; then
     clear
-    gum format < "$tmp_file" | gum pager
+    gum format < "$tmp_file" \
+      | gum style --foreground 46 \
+      | gum pager
   else
     cat "$tmp_file"
   fi
 
   rm -f "$tmp_file"
 }
+
