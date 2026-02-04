@@ -17,10 +17,9 @@ detect_arch() {
 
 install_pkg() {
   local pkg="$1"
-  command -v "$pkg" >/dev/null 2>&1 && return 0
+  command -v "$pkg" >/dev/null 2>&1 && return
 
-  log_info "Installing package: $pkg"
-  case "$DISTRO" in
+  case "$(detect_distro)" in
     ubuntu|debian)
       sudo apt-get update -y
       sudo apt-get install -y "$pkg"
@@ -32,7 +31,7 @@ install_pkg() {
       sudo pacman -Sy --noconfirm "$pkg"
       ;;
     *)
-      log_error "Unsupported distro: $DISTRO"
+      log_error "Unsupported distro"
       exit 1
       ;;
   esac

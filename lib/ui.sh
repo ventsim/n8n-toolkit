@@ -1,34 +1,65 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
-IFS=$'\n\t'
 
-LOG_FILE="${LOG_FILE:-setup.log}"
+# Color theme (lime green)
+THEME_FG=46
+THEME_BORDER=46
+WARN_FG=214
+ERROR_FG=196
+INFO_FG=82
 
-log_info()  { echo "[$(date '+%F %T')] [INFO]  $*" | tee -a "$LOG_FILE"; }
-log_warn()  { echo "[$(date '+%F %T')] [WARN]  $*" | tee -a "$LOG_FILE"; }
-log_error() { echo "[$(date '+%F %T')] [ERROR] $*" | tee -a "$LOG_FILE"; }
+log_raw() {
+  echo "[$(date '+%F %T')] $*" >> setup.log
+}
 
-prompt() {
-  local __var="$1" text="$2" def="$3"
-  if $NON_INTERACTIVE; then
-    eval "$__var=\"$def\""
-    log_info "Using default for $__var=$def"
+log_info() {
+  log_raw "INFO: $*"
+  if command -v gum >/dev/null; then
+    gum style --foreground $INFO_FG "ℹ $*"
   else
-    if command -v gum >/dev/null 2>&1; then
-      local val
-      val=$(gum input --value "$def" --prompt "$text ")
-      val="${val:-$def}"
-      eval "$__var=\"$val\""
-    else
-      read -rp "$text [$def]: " val
-      val="${val:-$def}"
-      eval "$__var=\"$val\""
-    fi
+    echo "ℹ $*"
+  fi
+}
+
+log_warn() {
+  log_raw "WARN: $*"
+  if command -v gum >/dev/null; then
+    gum style --foreground $WARN_FG "⚠ $*"
+  else
+    echo "⚠ $*"
+  fi
+}
+
+log_error() {
+  log_raw "ERROR: $*"
+  if command -v gum >/dev/null; then
+    gum style --foreground $ERROR_FG "✖ $*"
+  else
+    echo "✖ $*"
   fi
 }
 
 ui_header() {
-  command -v gum >/dev/null 2>&1 || return 0
+  command -v gum >/dev/null || return
   clear
-  gum style --border double --padding "2 4" --width 70 --align center "$@"
+  gum style \
+    --foreground $THEME_FG --border-foreground $THEME_BORDER --border double \
+    --align center --width 70 --margin "1 2" --padding "2 4" \
+    "$1" "$2"
+}
+
+ui_spin() {
+  if command -v gum >/dev/null; then
+    gum spin --spinner dot --title "$1" -- "$2"
+  else
+    eval "$2"
+  fi
+}
+
+ui_confirm() {
+  if command -v gum >/dev/null; then
+    gum confirm "$1"
+  else
+    read -rp "$1 [Y/n]: " r
+    [[ "${r:-Y}" =~ ^[Yy]$ ]]
+  fi
 }

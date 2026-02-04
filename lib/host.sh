@@ -29,7 +29,9 @@ ensure_docker_group() {
   if ! groups "$USER" | grep -q '\bdocker\b'; then
     log_warn "User not in docker group, adding..."
     sudo usermod -aG docker "$USER"
-    log_error "Re-login required. Run: newgrp docker"
+    log_info "Re-login required. Running newgrp docker"
+    newgrp docker
+   # log_error "Re-login required. Run: newgrp docker"
     exit 0
   fi
 }
