@@ -117,38 +117,20 @@ EOF
   fi
 }
 
-ui_final_screen() {
-  if ! command -v gum >/dev/null 2>&1; then
-    echo "✅ Setup complete!"
-    echo "Access n8n at: https://$DOMAIN"
-    return
+render_final_page() {
+  local tmp_file
+  tmp_file=$(mktemp)
+
+  sed -e "s|{{DOMAIN}}|$DOMAIN|g" \
+      -e "s|{{PORT}}|$PORT|g" \
+      final.md > "$tmp_file"
+
+  if command -v gum >/dev/null 2>&1; then
+    clear
+    gum format < "$tmp_file" | gum pager
+  else
+    cat "$tmp_file"
   fi
 
-  clear
-  gum style \
-    --foreground 46 --border-foreground 46 --border double \
-    --align center --width 70 --margin "1 2" --padding "2 4" \
-    '✅ n8n DEPLOYMENT COMPLETE' \
-    'Your automation platform is ready!'
-
-  echo ""
-  gum style --foreground 82 --bold "🔗 ACCESS URLS"
-  {
-    echo "🌐 Primary Domain:;https://$DOMAIN"
-    [ "$SETUP_LOCALHOST" = "true" ] && echo "💻 Local Alias:;https://localhost.n8n"
-    echo "🔧 Direct Access:;http://localhost:$PORT"
-  } | column -t -s ';' | gum format
-
-  echo ""
-  gum style --foreground 82 --bold "⚙️ MANAGEMENT"
-  cat << 'EOF' | gum format -t code
-docker compose ps
-docker compose logs -f n8n
-docker compose restart n8n
-docker compose down
-EOF
-
-  echo ""
-  gum style --foreground 214 --bold "🔐 IMPORTANT FILES"
-  printf "• .env\n• secrets/encryption_key.txt\n• Caddyfile\n" | gum format
+  rm -f "$tmp_file"
 }

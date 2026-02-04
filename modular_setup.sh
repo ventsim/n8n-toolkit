@@ -82,4 +82,4 @@ ui_run "Starting n8n stack" start_stack
 wait_for_container "n8n" 90
 wait_for_container "caddy" 30
 
-ui_final_screen
+render_final_page
