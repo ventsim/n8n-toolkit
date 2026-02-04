@@ -4,3 +4,23 @@
         header_up X-Forwarded-Proto https
     }
 }
+
+# Local development alias
+localhost.n8n {
+    tls internal
+    reverse_proxy n8n:$PORT {
+        header_up Host {host}
+        header_up X-Forwarded-Proto https
+    }
+}
+
+# IP-based fallback
+:80, :443 {
+    @ip not host *.*
+    handle @ip {
+        reverse_proxy n8n:$PORT {
+            header_up Host $DOMAIN
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+}

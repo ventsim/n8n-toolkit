@@ -1,114 +1,158 @@
 #!/usr/bin/env bash
-# stage1/setup.sh - Stage 1: Lean Prototyping
-
 set -Eeuo pipefail
+IFS=$'\n\t'
 
-# Load common modules
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/common.sh"
+# ========================
+# Globals / Flags
+# ========================
+LOG_FILE="setup.log"
+OLD_LOG_FILE="setup.log.prev"
+DRY_RUN=false
+NON_INTERACTIVE=false
 
-# Initialize
-main_init "$@"
+for arg in "$@"; do
+  case $arg in
+    --dry-run) DRY_RUN=true ;;
+    --non-interactive) NON_INTERACTIVE=true ;;
+  esac
+done
 
-# Main execution
-main() {
-    show_banner "🚀 n8n Stage 1 Setup" "Lean Prototyping Deployment"
-    
-    log "Starting Stage 1 deployment..."
-    
-    # Check system
-    local distro
-    distro=$(detect_distro)
-    log "Detected distro: $distro"
-    
-    # Ensure dependencies
-    ensure_dependencies true
-    
-    # Install Gum for better UI
-    install_gum || log_warn "Gum installation failed, using basic prompts"
-    
-    # Configure domain and port
-    local DOMAIN=""
-    local SETUP_LOCALHOST=false
-    prompt_domain "DOMAIN" "n8n.local" "SETUP_LOCALHOST"
-    
-    local PORT=""
-    prompt_port "PORT" "5678"
-    
-    # Check DNS (warning only)
-    check_dns "$DOMAIN" || true
-    
-    # Setup secrets
-    source "${MODULES_DIR}/security/secrets.sh"
-    local ENCRYPTION_KEY
-    ENCRYPTION_KEY=$(manage_secrets "encryption_key")
-    
-    # Generate .env file
-    cat > .env <<EOF
-DOMAIN=$DOMAIN
-PORT=$PORT
-SETUP_LOCALHOST=$SETUP_LOCALHOST
-ENCRYPTION_KEY=$ENCRYPTION_KEY
-UID=$(id -u)
-GID=$(id -g)
-EOF
-    
-    log_success ".env file created"
-    
-    # Get n8n version
-    source "${MODULES_DIR}/services/n8n.sh"
-    local N8N_VERSION
-    N8N_VERSION=$(get_n8n_version)
-    log "Using n8n version: $N8N_VERSION"
-    
-    # Generate configuration files
-    source "${MODULES_DIR}/config/templates.sh"
-    
-    # Docker Compose
-    generate_from_template \
-        "${SCRIPT_DIR}/docker-compose.yml.template" \
-        "docker-compose.yml" \
-        "N8N_VERSION=$N8N_VERSION" \
-        "PORT=$PORT" \
-        "DOMAIN=$DOMAIN" \
-        "ENCRYPTION_KEY=$ENCRYPTION_KEY" \
-        "UID=$(id -u)" \
-        "GID=$(id -g)"
-    
-    # Caddyfile
-    if [ "$SETUP_LOCALHOST" = "true" ]; then
-        generate_caddyfile_multi_domain "$DOMAIN" "$PORT" "localhost.n8n"
-        add_to_hosts "localhost.n8n"
-    else
-        generate_caddyfile_single_domain "$DOMAIN" "$PORT"
-    fi
-    
-    # Add primary domain to hosts if .local
-    if [[ "$DOMAIN" == *.local ]]; then
-        add_to_hosts "$DOMAIN"
-    fi
-    
-    # Setup data directories
-    source "${MODULES_DIR}/data/directories.sh"
-    setup_data_directories
-    
-    # Start services
-    log "Starting services..."
-    if command -v gum >/dev/null 2>&1; then
-        show_spinner "Starting n8n stack" docker compose up -d
-    else
-        docker compose up -d
-    fi
-    
-    # Health checks
-    source "${MODULES_DIR}/monitoring/health.sh"
-    health_check_n8n_deployment "$DOMAIN" "$PORT" "$SETUP_LOCALHOST"
-    
-    # Show summary
-    show_deployment_summary "$DOMAIN" "$PORT" "$SETUP_LOCALHOST"
-    
-    log_success "Stage 1 deployment complete!"
+rotate_logs() {
+  [ -f "$LOG_FILE" ] && mv "$LOG_FILE" "$OLD_LOG_FILE"
+  : > "$LOG_FILE"
 }
 
-# Run main
-main "$@"
+rotate_logs
+
+# ========================
+# Load libs
+# ========================
+source lib/ui.sh
+source lib/system.sh
+source lib/env.sh
+source lib/host.sh
+source lib/stack.sh
+
+log_info "🚀 n8n Stage 1 Lean Setup Starting"
+
+# ========================
+# System detection
+# ========================
+DISTRO=$(detect_distro)
+ARCH=$(detect_arch)
+log_info "Detected distro: $DISTRO"
+log_info "Detected arch: $ARCH"
+
+# ========================
+# Dependencies
+# ========================
+log_info "🔧 Ensuring dependencies..."
+for dep in curl awk sed grep getent openssl ss; do install_pkg "$dep"; done
+
+install_docker
+install_compose_plugin
+
+# ========================
+# Docker permissions
+# ========================
+ensure_docker_group
+
+# ========================
+# Detect latest n8n
+# ========================
+log_info "🔎 Detecting latest stable n8n version..."
+N8N_VERSION=$(curl -s https://registry.hub.docker.com/v2/repositories/n8nio/n8n/tags?page_size=100 \
+  | grep -oE '"name":"[0-9]+\.[0-9]+\.[0-9]+"' \
+  | sed 's/"name":"//;s/"//' \
+  | sort -Vr | head -n1)
+
+[ -z "$N8N_VERSION" ] && { log_error "Could not detect n8n version"; exit 1; }
+log_info "Latest stable n8n: $N8N_VERSION"
+
+# ========================
+# UI Header
+# ========================
+ui_header "🚀 n8n Deployment Setup" "Configure your installation"
+
+# ========================
+# User input
+# ========================
+prompt DOMAIN "Enter domain / IP / hostname" "n8n.local"
+prompt PORT "Enter n8n internal port" "5678"
+SETUP_LOCALHOST=false
+
+if command -v gum >/dev/null 2>&1; then
+  gum confirm "Enable localhost.n8n alias?" && SETUP_LOCALHOST=true
+else
+  read -rp "Enable localhost.n8n alias? [Y/n]: " r
+  [[ "${r:-Y}" =~ ^[Yy]$ ]] && SETUP_LOCALHOST=true
+fi
+
+check_port "$PORT" || log_warn "Port may already be in use"
+check_dns "$DOMAIN" || log_warn "DNS not resolving for $DOMAIN (OK for local)"
+
+# Always ask about /etc/hosts
+if command -v gum >/dev/null 2>&1; then
+  gum confirm "Add $DOMAIN to /etc/hosts?" && add_hosts_entry "$DOMAIN"
+else
+  read -rp "Add $DOMAIN to /etc/hosts? [Y/n]: " r
+  [[ "${r:-Y}" =~ ^[Yy]$ ]] && add_hosts_entry "$DOMAIN"
+fi
+
+# ========================
+# Secrets + env
+# ========================
+load_or_create_secret
+write_env_file
+
+# ========================
+# Generate configs
+# ========================
+log_info "Generating docker-compose.yml and Caddyfile..."
+
+sed -e "s|{{N8N_VERSION}}|$N8N_VERSION|g" \
+    -e "s|{{PORT}}|$PORT|g" \
+    -e "s|{{DOMAIN}}|$DOMAIN|g" \
+    -e "s|{{ENCRYPTION_KEY}}|$ENCRYPTION_KEY|g" \
+    -e "s|{{UID}}|$(id -u)|g" \
+    -e "s|{{GID}}|$(id -g)|g" \
+    docker-compose.yml.template > docker-compose.yml
+
+if [ "$SETUP_LOCALHOST" = "true" ]; then
+cat > Caddyfile <<EOF
+$DOMAIN {
+    reverse_proxy n8n:$PORT
+}
+
+localhost.n8n {
+    tls internal
+    reverse_proxy n8n:$PORT
+}
+EOF
+else
+sed -e "s|{{DOMAIN}}|$DOMAIN|g" \
+    -e "s|{{PORT}}|$PORT|g" \
+    Caddyfile.template > Caddyfile
+fi
+
+# ========================
+# Data dirs
+# ========================
+log_info "Ensuring data directories..."
+mkdir -p data/n8n data/caddy data/caddy-config logs
+sudo chown -R "$(id -u):$(id -g)" data logs
+
+# ========================
+# Start stack
+# ========================
+start_stack
+
+# ========================
+# Health checks
+# ========================
+wait_for_container "n8n" 90
+wait_for_container "caddy" 30
+
+log_info "🎉 All services are running!"
+log_info "Access: https://$DOMAIN"
+[ "$SETUP_LOCALHOST" = "true" ] && log_info "Local: https://localhost.n8n"

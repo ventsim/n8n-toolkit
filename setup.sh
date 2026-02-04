@@ -264,36 +264,46 @@ if command -v gum >/dev/null 2>&1; then
     'Configure your installation'
 fi
 
+# ========================
 # Domain configuration
+# ========================
 log "Configuring domain access..."
+
+DEFAULT_DOMAIN="n8n.example.com"
+
 if command -v gum >/dev/null 2>&1; then
-  DOMAIN=$(gum input --placeholder "n8n.local" --value "n8n.local" \
-    --prompt.foreground 212 --prompt "Enter primary domain: " \
-    --header "This can be a domain name or local hostname")
-  
+  DOMAIN=$(gum input \
+    --placeholder "$DEFAULT_DOMAIN" \
+    --value "$DEFAULT_DOMAIN" \
+    --prompt.foreground 212 \
+    --prompt "Enter public domain (can be placeholder): " \
+    --header "You can use a real domain or a placeholder for now")
+
+  gum confirm "Do you want to add $DOMAIN to /etc/hosts for local access?" && ADD_HOSTS=true || ADD_HOSTS=false
+
   gum confirm "Setup localhost.n8n alias for local access?" && SETUP_LOCALHOST=true || SETUP_LOCALHOST=false
-  
-  # Add to /etc/hosts if it's a .local domain
-  if [[ "$DOMAIN" == *.local ]]; then
-    gum confirm "Add $DOMAIN to /etc/hosts for local DNS resolution?" && {
-      echo "127.0.0.1 $DOMAIN" | sudo tee -a /etc/hosts
-      log "✅ Added $DOMAIN to /etc/hosts"
-    }
-  fi
 else
-  prompt DOMAIN "Enter domain / IP / local hostname" "n8n.local"
+  prompt DOMAIN "Enter public domain (can be placeholder)" "$DEFAULT_DOMAIN"
+
+  read -rp "Add $DOMAIN to /etc/hosts for local access? [Y/n]: " hosts_resp
+  hosts_resp=${hosts_resp:-Y}
+  [[ "$hosts_resp" =~ ^[Yy]$ ]] && ADD_HOSTS=true || ADD_HOSTS=false
+
   read -rp "Setup localhost.n8n alias for local access? [Y/n]: " local_resp
   local_resp=${local_resp:-Y}
   [[ "$local_resp" =~ ^[Yy]$ ]] && SETUP_LOCALHOST=true || SETUP_LOCALHOST=false
-  
-  if [[ "$DOMAIN" == *.local ]]; then
-    read -rp "Add $DOMAIN to /etc/hosts? [Y/n]: " hosts_resp
-    hosts_resp=${hosts_resp:-Y}
-    [[ "$hosts_resp" =~ ^[Yy]$ ]] && {
-      echo "127.0.0.1 $DOMAIN" | sudo tee -a /etc/hosts
-      log "✅ Added $DOMAIN to /etc/hosts"
-    }
-  fi
+fi
+
+# Add chosen DOMAIN to /etc/hosts if requested
+if [ "$ADD_HOSTS" = "true" ] && ! grep -q "$DOMAIN" /etc/hosts 2>/dev/null; then
+  echo "127.0.0.1 $DOMAIN" | sudo tee -a /etc/hosts >/dev/null
+  log "✅ Added $DOMAIN to /etc/hosts"
+fi
+
+# Add localhost.n8n to /etc/hosts if enabled
+if [ "$SETUP_LOCALHOST" = "true" ] && ! grep -q "localhost.n8n" /etc/hosts 2>/dev/null; then
+  echo "127.0.0.1 localhost.n8n" | sudo tee -a /etc/hosts >/dev/null
+  log "✅ Added localhost.n8n to /etc/hosts"
 fi
 
 # Port configuration
