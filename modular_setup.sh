@@ -24,18 +24,16 @@ log_info "Detected distro: $DISTRO"
 log_info "Detected arch: $ARCH"
 
 log_info "🔧 Ensuring dependencies..."
-ui_run "Installing system packages" bash -c 'for dep in curl awk sed grep getent openssl ss; do install_pkg "$dep"; done'
+for dep in curl awk sed grep getent openssl ss; do install_pkg "$dep"; done
 
-ui_run "Installing Docker" install_docker
-ui_run "Installing Docker Compose" install_compose_plugin
+install_docker
+install_compose_plugin
+ensure_docker_group
 
-ui_run "Detecting latest n8n version" bash -c '
+log_info "🔎 Detecting latest stable n8n version..."
 N8N_VERSION=$(curl -s https://registry.hub.docker.com/v2/repositories/n8nio/n8n/tags?page_size=100 \
-  | grep -oE '"'"'"name":"[0-9]+\.[0-9]+\.[0-9]+"'"'"' \
-  | sed '"'"'s/"name":"//;s/"//'"'"' \
-  | sort -Vr | head -n1)
-echo "$N8N_VERSION"
-'
+  | grep -oE '"name":"[0-9]+\.[0-9]+\.[0-9]+"' | sed 's/"name":"//;s/"//' | sort -Vr | head -n1)
+
 ui_header "🚀 n8n Deployment Setup" "Configure your installation"
 
 prompt DOMAIN "Enter domain / IP / hostname" "n8n.local"
@@ -78,7 +76,7 @@ log_info "Ensuring data directories..."
 mkdir -p data/n8n data/caddy data/caddy-config logs
 sudo chown -R "$(id -u):$(id -g)" data logs
 
-ui_run "Starting n8n stack" start_stack
+start_stack
 wait_for_container "n8n" 90
 wait_for_container "caddy" 30
 
