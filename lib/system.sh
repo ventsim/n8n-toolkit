@@ -20,7 +20,7 @@ install_pkg() {
   command -v "$pkg" >/dev/null 2>&1 && return
 
   case "$(detect_distro)" in
-    ubuntu|debian)
+    ubuntu|debian|elementary)
       sudo apt-get update -y
       sudo apt-get install -y "$pkg"
       ;;
