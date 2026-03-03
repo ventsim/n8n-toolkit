@@ -1,603 +1,259 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+IFS=$'\n\t'
 
+# ========================
+# Globals / Defaults
+# ========================
 LOG_FILE="setup.log"
 OLD_LOG_FILE="setup.log.prev"
-DRY_RUN=false
-NON_INTERACTIVE=false
+STATE_FILE=".install-state.env"
 
+INTERACTIVE=false
+CONFIG_FILE=""
+
+# Defaults (silent-first)
+DOMAIN="n8n.local"
+PORT="5678"
+SETUP_LOCALHOST=true
+N8N_VERSION="latest"
+
+# ========================
+# Detect Previous Run
+# ========================
+if [ -f "$STATE_FILE" ]; then
+  echo "⚠️  Previous installation detected ($STATE_FILE exists)."
+  echo "This script has already been run on this machine."
+  echo "If you want to re-run cleanly, use cleanup.sh first."
+  echo ""
+fi
+
+# ========================
+# Parse Args
+# ========================
 for arg in "$@"; do
-  case $arg in
-    --dry-run) DRY_RUN=true ;;
-    --non-interactive) NON_INTERACTIVE=true ;;
+  case "$arg" in
+    --interactive) INTERACTIVE=true ;;
+    --domain=*) DOMAIN="${arg#*=}" ;;
+    --port=*) PORT="${arg#*=}" ;;
+    --setup-localhost=*) SETUP_LOCALHOST="${arg#*=}" ;;
+    --n8n-version=*) N8N_VERSION="${arg#*=}" ;;
+    --config=*) CONFIG_FILE="${arg#*=}" ;;
+    *)
+      echo "Unknown argument: $arg"
+      exit 1
+      ;;
   esac
 done
 
-rotate_logs() {
-  [ -f "$LOG_FILE" ] && mv "$LOG_FILE" "$OLD_LOG_FILE"
-  : > "$LOG_FILE"
-}
-
-log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOG_FILE"; }
-
-run() {
-  if $DRY_RUN; then
-    log "[DRY-RUN] $*"
-  else
-    eval "$@" | tee -a "$LOG_FILE"
-  fi
-}
-
-rotate_logs
-log "🚀 n8n Stage 1 Lean Setup Starting"
+# ========================
+# Rotate logs
+# ========================
+[ -f "$LOG_FILE" ] && mv "$LOG_FILE" "$OLD_LOG_FILE"
+: > "$LOG_FILE"
 
 # ========================
-# Distro detection
+# Init install state
 # ========================
-detect_distro() {
-  if [ -f /etc/os-release ]; then . /etc/os-release; echo "$ID"; else echo "unknown"; fi
-}
-DISTRO=$(detect_distro)
-log "Detected distro: $DISTRO"
+: > "$STATE_FILE"
+echo "INSTALL_STARTED_AT=\"$(date -Is)\"" >> "$STATE_FILE"
 
-# ========================
-# Package install helpers
-# ========================
-install_pkg() {
-  local pkg="$1"
-  command -v "$pkg" >/dev/null 2>&1 && return 0
-  log "Installing $pkg..."
-  case "$DISTRO" in
-    ubuntu|debian)
-      run "sudo apt-get update -y"
-      run "sudo apt-get install -y $pkg"
-      ;;
-    rocky|almalinux|centos|rhel)
-      run "sudo dnf install -y $pkg"
-      ;;
-    arch)
-      run "sudo pacman -Sy --noconfirm $pkg"
-      ;;
-    *)
-      log "❌ Unsupported distro: $DISTRO"
-      exit 1
-      ;;
-  esac
-}
-
-install_docker() {
-  if command -v docker >/dev/null 2>&1; then
-    log "Docker already installed"
-    return
-  fi
-  log "Installing Docker..."
-  run "curl -fsSL https://get.docker.com | sudo sh"
-}
-
-install_compose_plugin() {
-  if docker compose version >/dev/null 2>&1; then
-    log "Docker Compose plugin already installed"
-    return
-  fi
-  log "Installing Docker Compose plugin..."
-  local ARCH
-  ARCH=$(uname -m)
-  case "$ARCH" in
-    x86_64) ARCH="x86_64" ;;
-    aarch64|arm64) ARCH="aarch64" ;;
-    *) log "❌ Unsupported arch: $ARCH"; exit 1 ;;
-  esac
-
-  local DEST="/usr/local/lib/docker/cli-plugins"
-  run "sudo mkdir -p $DEST"
-  local URL
-  URL=$(curl -s https://api.github.com/repos/docker/compose/releases/latest \
-    | grep browser_download_url \
-    | grep "linux-$ARCH" \
-    | cut -d '"' -f 4)
-
-  [ -z "$URL" ] && { log "❌ Failed to detect Compose plugin URL"; exit 1; }
-
-  run "sudo curl -L $URL -o $DEST/docker-compose"
-  run "sudo chmod +x $DEST/docker-compose"
+track() {
+  echo "$1" >> "$STATE_FILE"
 }
 
 # ========================
-# Install Gum for beautiful prompts
+# Load libs
 # ========================
-install_gum() {
-    if command -v gum >/dev/null 2>&1; then
-        log "Gum already installed"
-        return
-    fi
-    
-    log "Installing Gum for beautiful terminal prompts..."
-    
-    # Try direct download (works on most systems)
-    local ARCH
-    ARCH=$(uname -m)
-    case "$ARCH" in
-        x86_64) ARCH="amd64" ;;
-        aarch64|arm64) ARCH="arm64" ;;
-        *) log "⚠️  Unsupported arch for Gum, will use basic prompts"; return 1 ;;
-    esac
-    
-    local GUM_VERSION
-    GUM_VERSION=$(curl -s https://api.github.com/repos/charmbracelet/gum/releases/latest | grep tag_name | cut -d'"' -f4 2>/dev/null || echo "v0.13.0")
-    
-    log "Downloading Gum ${GUM_VERSION}..."
-    if run "sudo curl -L https://github.com/charmbracelet/gum/releases/download/${GUM_VERSION}/gum_${GUM_VERSION#v}_linux_${ARCH}.tar.gz -o /tmp/gum.tar.gz"; then
-        run "sudo tar -xzf /tmp/gum.tar.gz -C /usr/local/bin gum"
-        run "sudo rm -f /tmp/gum.tar.gz"
-        
-        if command -v gum >/dev/null 2>&1; then
-            log "✅ Gum installed successfully"
-            return 0
-        fi
-    fi
-    
-    log "⚠️  Failed to install Gum, will use basic prompts"
-    return 1
-}
+source lib/ui.sh
+source lib/system.sh
+source lib/env.sh
+source lib/host.sh
+source lib/stack.sh
+
+log_info "🚀 n8n Development Stack Setup Starting"
 
 # ========================
-# Ensure dependencies
+# Load from config file
 # ========================
-log "🔧 Ensuring dependencies..."
-for dep in curl awk sed grep getent openssl; do install_pkg "$dep"; done
-install_docker
-run "sudo systemctl enable --now docker || true"
-install_compose_plugin
-install_gum
-
-# ========================
-# Helpers with Gum if available
-# ========================
-prompt() {
-  local var="$1" text="$2" def="$3"
-  if $NON_INTERACTIVE; then
-    eval "$var=\"$def\""
-    log "Using default for $var=$def"
-  else
-    if command -v gum >/dev/null 2>&1; then
-      local val
-      val=$(gum input --placeholder "$def" --value "$def" --prompt "$text")
-      val="${val:-$def}"
-      eval "$var=\"$val\""
-    else
-      while true; do
-        read -rp "$text [$def]: " val
-        val="${val:-$def}"
-        [ -n "$val" ] && break
-      done
-      eval "$var=\"$val\""
-    fi
-  fi
-}
-
-generate_key() {
-  # Generate 32 random bytes, base64 encode = ~43 characters
-  openssl rand -base64 32 | tr -d '\n' | head -c 32
-}
-
-check_port() {
-  local port="$1"
-  if ss -tuln | grep -q ":$port "; then
-    log "❌ Port $port is already in use"
-    if $NON_INTERACTIVE; then
-      exit 1
-    else
-      if command -v gum >/dev/null 2>&1; then
-        local new_port
-        new_port=$(gum choose --height 4 --cursor "➜" "5679" "5680" "5681" "Custom port")
-        if [ "$new_port" = "Custom port" ]; then
-          new_port=$(gum input --placeholder "Enter custom port" --prompt "Port: ")
-        fi
-        if [[ "$new_port" =~ ^[0-9]+$ ]] && [ "$new_port" -ge 1024 ] && [ "$new_port" -le 65535 ]; then
-          PORT="$new_port"
-        else
-          log "⚠️  Invalid port. Using default 5678."
-          PORT=5678
-        fi
-      else
-        while true; do
-          read -rp "Choose another port (1024-65535): " new_port
-          if [[ "$new_port" =~ ^[0-9]+$ ]] && [ "$new_port" -ge 1024 ] && [ "$new_port" -le 65535 ]; then
-            PORT="$new_port"
-            break
-          fi
-        done
-      fi
-    fi
-  fi
-}
-
-check_dns() {
-  local host="$1"
-  log "Checking DNS for $host..."
-  local ip
-  ip=$(getent hosts "$host" | awk '{print $1}' || true)
-  if [ -z "$ip" ]; then
-    log "⚠️  DNS for $host not resolving yet (OK for local use)"
-    return 1
-  fi
-  log "DNS OK: $host resolves to $ip"
-}
-
-# ========================
-# Ensure docker group access
-# ========================
-
-if ! groups "$USER" | grep -q '\bdocker\b'; then
-  log "User $USER is not in docker group"
-  log "Adding $USER to docker group..."
-  sudo usermod -aG docker "$USER"
-
-  echo ""
-  echo "⚠️  You have been added to the docker group."
-  echo "➡ You must log out and back in (or run: newgrp docker)"
-  echo "➡ Then re-run this script."
-  exit 0
+if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
+  log_info "Loading config from $CONFIG_FILE"
+  source "$CONFIG_FILE"
 fi
+
+# ========================
+# System detection
+# ========================
+DISTRO=$(detect_distro)
+ARCH=$(detect_arch)
+log_info "Detected distro: $DISTRO"
+log_info "Detected arch: $ARCH"
+
+# ========================
+# Dependencies
+# ========================
+log_info "🔧 Ensuring dependencies..."
+INSTALLED_PKGS=()
+for dep in curl awk sed grep getent openssl ss; do
+  if ! command -v "$dep" >/dev/null 2>&1; then
+    install_pkg "$dep"
+    INSTALLED_PKGS+=("$dep")
+  fi
+done
+
+[ "${#INSTALLED_PKGS[@]}" -gt 0 ] && track "INSTALLED_PKGS=\"${INSTALLED_PKGS[*]}\""
+
+if ! command -v docker >/dev/null 2>&1; then
+  install_docker
+  track "INSTALLED_DOCKER=true"
+fi
+
+if ! docker compose version >/dev/null 2>&1; then
+  install_compose_plugin
+  track "INSTALLED_COMPOSE=true"
+fi
+
+if ! command -v gum >/dev/null 2>&1; then
+  install_gum
+  track "INSTALLED_GUM=true"
+fi
+
+# ========================
+# Docker permissions
+# ========================
+ensure_docker_group
 
 # ========================
 # Detect latest n8n
 # ========================
-log "🔎 Detecting latest stable n8n version..."
-N8N_VERSION=$(curl -s https://registry.hub.docker.com/v2/repositories/n8nio/n8n/tags?page_size=100 \
-  | grep -oE '"name":"[0-9]+\.[0-9]+\.[0-9]+"' \
-  | sed 's/"name":"//;s/"//' \
-  | sort -Vr | head -n1)
+if [ "$N8N_VERSION" = "latest" ]; then
+  log_info "🔎 Detecting latest stable n8n version..."
+  N8N_VERSION=$(curl -s https://registry.hub.docker.com/v2/repositories/n8nio/n8n/tags?page_size=100 \
+    | grep -oE '"name":"[0-9]+\.[0-9]+\.[0-9]+"' \
+    | sed 's/"name":"//;s/"//' \
+    | sort -Vr | head -n1)
 
-[ -z "$N8N_VERSION" ] && { log "❌ Could not detect n8n version"; exit 1; }
-log "Latest stable n8n: $N8N_VERSION"
+  [ -z "$N8N_VERSION" ] && { log_error "Could not detect n8n version"; exit 1; }
+fi
+
+log_info "Using n8n version: $N8N_VERSION"
 
 # ========================
-# User input with Gum styling
+# Interactive Template Builder
 # ========================
-if command -v gum >/dev/null 2>&1; then
-  clear
-  gum style \
-    --foreground 212 --border-foreground 212 --border double \
-    --align center --width 70 --margin "1 2" --padding "2 4" \
-    '🚀 n8n Deployment Setup' \
-    'Configure your installation'
+if $INTERACTIVE; then
+  ui_header "🚀 n8n Deployment Setup" "Template Builder Mode"
+
+  prompt DOMAIN "Enter domain / IP / hostname" "$DOMAIN"
+  prompt PORT "Enter n8n internal port" "$PORT"
+
+  if command -v gum >/dev/null 2>&1; then
+    gum confirm "Enable localhost.n8n alias?" && SETUP_LOCALHOST=true || SETUP_LOCALHOST=false
+  else
+    read -rp "Enable localhost.n8n alias? [Y/n]: " r
+    [[ "${r:-Y}" =~ ^[Yy]$ ]] && SETUP_LOCALHOST=true || SETUP_LOCALHOST=false
+  fi
 fi
 
 # ========================
-# Domain configuration
+# Validation
 # ========================
-log "Configuring domain access..."
+check_port "$PORT" || log_warn "Port may already be in use"
+check_dns "$DOMAIN" || log_warn "DNS not resolving for $DOMAIN (OK for local)"
 
-DEFAULT_DOMAIN="n8n.example.com"
-
-if command -v gum >/dev/null 2>&1; then
-  DOMAIN=$(gum input \
-    --placeholder "$DEFAULT_DOMAIN" \
-    --value "$DEFAULT_DOMAIN" \
-    --prompt.foreground 212 \
-    --prompt "Enter public domain (can be placeholder): " \
-    --header "You can use a real domain or a placeholder for now")
-
-  gum confirm "Do you want to add $DOMAIN to /etc/hosts for local access?" && ADD_HOSTS=true || ADD_HOSTS=false
-
-  gum confirm "Setup localhost.n8n alias for local access?" && SETUP_LOCALHOST=true || SETUP_LOCALHOST=false
-else
-  prompt DOMAIN "Enter public domain (can be placeholder)" "$DEFAULT_DOMAIN"
-
-  read -rp "Add $DOMAIN to /etc/hosts for local access? [Y/n]: " hosts_resp
-  hosts_resp=${hosts_resp:-Y}
-  [[ "$hosts_resp" =~ ^[Yy]$ ]] && ADD_HOSTS=true || ADD_HOSTS=false
-
-  read -rp "Setup localhost.n8n alias for local access? [Y/n]: " local_resp
-  local_resp=${local_resp:-Y}
-  [[ "$local_resp" =~ ^[Yy]$ ]] && SETUP_LOCALHOST=true || SETUP_LOCALHOST=false
-fi
-
-# Add chosen DOMAIN to /etc/hosts if requested
-if [ "$ADD_HOSTS" = "true" ] && ! grep -q "$DOMAIN" /etc/hosts 2>/dev/null; then
-  echo "127.0.0.1 $DOMAIN" | sudo tee -a /etc/hosts >/dev/null
-  log "✅ Added $DOMAIN to /etc/hosts"
-fi
-
-# Add localhost.n8n to /etc/hosts if enabled
-if [ "$SETUP_LOCALHOST" = "true" ] && ! grep -q "localhost.n8n" /etc/hosts 2>/dev/null; then
-  echo "127.0.0.1 localhost.n8n" | sudo tee -a /etc/hosts >/dev/null
-  log "✅ Added localhost.n8n to /etc/hosts"
-fi
-
-# Port configuration
-log "Configuring port..."
-if command -v gum >/dev/null 2>&1; then
-  PORT=$(gum input --placeholder "5678" --value "5678" \
-    --prompt.foreground 212 --prompt "Enter n8n port: " \
-    --header "Internal port n8n will listen on")
-else
-  prompt PORT "Enter n8n internal port" "5678"
-fi
-check_port "$PORT"
-check_dns "$DOMAIN" || true
-
-# ========================
-# Encryption key
-# ========================
-mkdir -p secrets
-if [ ! -f secrets/encryption_key.txt ]; then
-  ENCRYPTION_KEY=$(generate_key)
-  echo "$ENCRYPTION_KEY" > secrets/encryption_key.txt
-  chmod 600 secrets/encryption_key.txt
-  log "🔐 Encryption key generated and saved"
-else
-  ENCRYPTION_KEY=$(cat secrets/encryption_key.txt)
-  log "Using existing encryption key"
+if $INTERACTIVE; then
+  if command -v gum >/dev/null 2>&1; then
+    gum confirm "Add $DOMAIN to /etc/hosts?" && { add_hosts_entry "$DOMAIN"; track "MODIFIED_HOSTS=true"; }
+  else
+    read -rp "Add $DOMAIN to /etc/hosts? [Y/n]: " r
+    [[ "${r:-Y}" =~ ^[Yy]$ ]] && { add_hosts_entry "$DOMAIN"; track "MODIFIED_HOSTS=true"; }
+  fi
 fi
 
 # ========================
-# Generate .env
+# Secrets + env
 # ========================
-cat > .env <<EOF
-DOMAIN=$DOMAIN
-PORT=$PORT
-N8N_VERSION=$N8N_VERSION
-ENCRYPTION_KEY=$ENCRYPTION_KEY
-SETUP_LOCALHOST=$SETUP_LOCALHOST
-UID=$(id -u)
-GID=$(id -g)
-EOF
-
-log "📄 .env file written"
+load_or_create_secret
+write_env_file
 
 # ========================
-# Generate configuration files from templates
+# Generate configs
 # ========================
-[ -f docker-compose.yml.template ] || { log "❌ docker-compose.yml.template missing"; exit 1; }
-[ -f Caddyfile.template ] || { log "❌ Caddyfile.template missing"; exit 1; }
+log_info "Generating docker-compose.yml and Caddyfile..."
 
-log "Generating configuration files from templates..."
-
-# Generate docker-compose.yml from template
-TMP_DC=$(mktemp)
 sed -e "s|{{N8N_VERSION}}|$N8N_VERSION|g" \
     -e "s|{{PORT}}|$PORT|g" \
     -e "s|{{DOMAIN}}|$DOMAIN|g" \
     -e "s|{{ENCRYPTION_KEY}}|$ENCRYPTION_KEY|g" \
     -e "s|{{UID}}|$(id -u)|g" \
     -e "s|{{GID}}|$(id -g)|g" \
-    docker-compose.yml.template > "$TMP_DC"
-run "mv $TMP_DC docker-compose.yml"
+    docker-compose.yml.template > docker-compose.yml
 
-# Generate Caddyfile from template
-TMP_CADDY=$(mktemp)
 if [ "$SETUP_LOCALHOST" = "true" ]; then
-  # Multi-domain Caddyfile
-  cat > "$TMP_CADDY" <<EOF
-# Primary domain: $DOMAIN
+cat > Caddyfile <<EOF
 $DOMAIN {
-    reverse_proxy n8n:$PORT {
-        header_up Host {host}
-        header_up X-Forwarded-Proto https
-    }
+    reverse_proxy n8n:$PORT
 }
 
-# Local development alias
 localhost.n8n {
     tls internal
-    reverse_proxy n8n:$PORT {
-        header_up Host {host}
-        header_up X-Forwarded-Proto https
-    }
-}
-
-# IP-based fallback
-:80, :443 {
-    @ip not host *.*
-    handle @ip {
-        reverse_proxy n8n:$PORT {
-            header_up Host $DOMAIN
-            header_up X-Forwarded-Proto {scheme}
-        }
-    }
+    reverse_proxy n8n:$PORT
 }
 EOF
 else
-  # Single domain Caddyfile
-  sed -e "s|{{DOMAIN}}|$DOMAIN|g" \
-      -e "s|{{PORT}}|$PORT|g" \
-      Caddyfile.template > "$TMP_CADDY"
-fi
-
-run "mv $TMP_CADDY Caddyfile"
-
-# Add localhost.n8n to /etc/hosts if enabled
-if [ "$SETUP_LOCALHOST" = "true" ] && ! grep -q "localhost.n8n" /etc/hosts 2>/dev/null; then
-  echo "127.0.0.1 localhost.n8n" | sudo tee -a /etc/hosts
-  log "✅ Added localhost.n8n to /etc/hosts"
+sed -e "s|{{DOMAIN}}|$DOMAIN|g" \
+    -e "s|{{PORT}}|$PORT|g" \
+    Caddyfile.template > Caddyfile
 fi
 
 # ========================
-# Ensure data directories & permissions
+# Data dirs
 # ========================
-log "📁 Ensuring persistent data directories..."
+log_info "Ensuring data directories..."
+mkdir -p data/n8n data/caddy data/caddy-config logs secrets
+sudo chown -R "$(id -u):$(id -g)" data logs secrets
 
-mkdir -p data/n8n data/caddy data/caddy-config logs
-
-log "🔐 Fixing ownership on data directories..."
-run "sudo chown -R $(id -u):$(id -g) data logs"
-
-log "🧪 Verifying write access..."
-touch data/n8n/.perm_test && rm data/n8n/.perm_test
-
-log "✅ Data directories ready"
+track "CREATED_DIRS=\"data logs secrets\""
 
 # ========================
 # Start stack
 # ========================
-log "▶ Starting stack..."
-if command -v gum >/dev/null 2>&1; then
-  gum spin --spinner dot --title "Starting n8n services..." -- docker compose up -d
-else
-  run "docker compose up -d"
-fi
+start_stack
 
 # ========================
-# Health check (simple and robust)
+# Health checks
 # ========================
-log "⏳ Waiting for services to start..."
-
-# Just check if containers are running (don't rely on health endpoints)
-wait_for_container() {
-    local container="$1"
-    local timeout="${2:-60}"
-    
-    for i in $(seq 1 $timeout); do
-        if docker ps --format "{{.Names}}" | grep -q "^${container}$"; then
-            if docker ps --format "{{.Names}} {{.Status}}" | grep -q "^${container}.*Up"; then
-                log "✅ $container is running"
-                return 0
-            fi
-        fi
-        sleep 1
-    done
-    log "⚠️  $container not running after ${timeout}s"
-    return 1
-}
-
-# Wait for core services
 wait_for_container "n8n" 90
 wait_for_container "caddy" 30
 
-# Quick test if we can reach n8n through Caddy (ignore SSL errors)
-log "⏳ Testing n8n accessibility..."
-for i in {1..10}; do
-    # Just check if we get any response at all
-    if timeout 5 curl -k -s https://$DOMAIN >/dev/null 2>&1; then
-        log "✅ n8n is accessible at https://$DOMAIN"
-        
-        # If local domain, warn about SSL
-        if [[ "$DOMAIN" =~ \.local$ ]] || [[ "$DOMAIN" == *localhost* ]]; then
-            log "ℹ️  Note: Browser will show SSL warning. This is normal for local domains."
-            log "   Click 'Advanced' → 'Proceed' to continue."
-        fi
-        break
-    fi
-    sleep 3
-done
-
-# Check localhost alias
-if [ "$SETUP_LOCALHOST" = "true" ]; then
-    for i in {1..5}; do
-        if timeout 5 curl -k -s https://localhost.n8n >/dev/null 2>&1; then
-            log "✅ localhost.n8n alias is working"
-            break
-        fi
-        sleep 2
-    done
-fi
-
-echo ""
-log "🎉 All services are running!"
-
 # ========================
-# Final output with styling
+# Template Output (if interactive)
 # ========================
-if command -v gum >/dev/null 2>&1; then
-  clear
-  
-  # Header
-  gum style \
-    --foreground 46 --border-foreground 46 --border double \
-    --align center --width 70 --margin "1 2" --padding "2 4" \
-    '✅ n8n DEPLOYMENT COMPLETE' \
-    'Your automation platform is ready!'
-  
-  # URLs section
-  echo ""
-  gum style --foreground 212 --bold "🔗 ACCESS URLs"
-  echo ""
-  
-  # Create a formatted table for URLs
-  {
-    echo "🌐 Primary Domain:;https://$DOMAIN"
-    if [ "$SETUP_LOCALHOST" = "true" ]; then
-      echo "💻 Local Access:;https://localhost.n8n"
-    fi
-    echo "🔧 Direct Access:;http://localhost:$PORT"
-  } | column -t -s ';' | gum format
-  
-  if [ "$SETUP_LOCALHOST" = "true" ]; then
-    gum style --foreground 214 --italic "Note - Accept the self-signed certificate warning for localhost.n8n"
-  fi
-  
-  # Commands section
-  echo ""
-  gum style --foreground 212 --bold "⚙️  MANAGEMENT COMMANDS"
-  echo ""
-  
-  cat << 'EOF' | gum format -t code
-# View logs
-docker compose logs -f n8n
-docker compose logs -f caddy
+if $INTERACTIVE; then
+  log_info "Writing deploy.env template..."
 
-# Check status
-docker compose ps
-
-# Restart services
-docker compose restart n8n
-docker compose restart caddy
-
-# Stop everything
-docker compose down
-
-# Update n8n
-docker compose pull n8n
-docker compose up -d
-
-# Remove the entire stack
-docker compose down
-cd ~ && sudo rm -rf n8n-toolkit
+  cat > deploy.env <<EOF
+DOMAIN="$DOMAIN"
+PORT="$PORT"
+SETUP_LOCALHOST="$SETUP_LOCALHOST"
+N8N_VERSION="$N8N_VERSION"
 EOF
-  
-  # Files section
+
   echo ""
-  gum style --foreground 212 --bold "🔐 IMPORTANT FILES"
+  log_info "Reusable silent install command:"
+  echo "------------------------------------------------"
+  echo "./setup.sh \\"
+  echo "  --domain=\"$DOMAIN\" \\"
+  echo "  --port=\"$PORT\" \\"
+  echo "  --setup-localhost=\"$SETUP_LOCALHOST\" \\"
+  echo "  --n8n-version=\"$N8N_VERSION\""
+  echo "------------------------------------------------"
   echo ""
-  printf "• .env - Configuration file\n• secrets/encryption_key.txt - Encryption key\n• Caddyfile - Reverse proxy config\n" | gum format
-  
-  # Troubleshooting
-  echo ""
-  gum style --foreground 214 --bold "⚠️  TROUBLESHOOTING"
-  printf "If you can't access n8n:\n• Check firewall: sudo ufw allow 80,443\n• Verify /etc/hosts entries\n• Check logs: docker compose logs\n" | gum format
-  
-  # SSL warning for local domains
-  if [[ "$DOMAIN" =~ \.local$ ]] || [[ "$DOMAIN" == *localhost* ]]; then
-    echo ""
-    gum style --foreground 196 --bold "🔒 SSL NOTE"
-    gum style --foreground 250 "Your browser will show a security warning because $DOMAIN uses a self-signed certificate."
-    gum style --foreground 250 "This is normal for local development. Click 'Advanced' → 'Proceed' to continue."
-  fi
-  
-else
-  # Fallback without gum
-  echo ""
-  echo "✅ Setup complete!"
-  echo ""
-  echo "Access n8n at:"
-  echo "  https://$DOMAIN"
-  if [ "$SETUP_LOCALHOST" = "true" ]; then
-    echo "  https://localhost.n8n (accept self-signed cert)"
-  fi
-  echo "  http://localhost:$PORT (direct access)"
-  echo ""
-  echo "Check logs:"
-  echo "  docker compose logs -f n8n caddy"
-  echo ""
-  echo "Keep secrets/encryption_key.txt safe!"
-  
-  # SSL warning
-  if [[ "$DOMAIN" =~ \.local$ ]] || [[ "$DOMAIN" == *localhost* ]]; then
-    echo ""
-    echo "🔒 SSL NOTE: Your browser will show a security warning because"
-    echo "   $DOMAIN uses a self-signed certificate. This is normal."
-    echo "   Click 'Advanced' → 'Proceed' to continue."
-  fi
+  log_info "Or run again with:"
+  echo "  ./setup.sh --config deploy.env"
 fi
+
+# ========================
+# Final Page
+# ========================
+render_final_page

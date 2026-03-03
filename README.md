@@ -88,8 +88,8 @@ For that → **Stage 2+**
 ### Install
 
 ```bash
-git clone https://github.com/your-org/n8n-stage1.git
-cd n8n-stage1
+git clone https://github.com/n8n-toolkit.git
+cd n8n-toolkit
 chmod +x setup.sh
 ./setup.sh
 ```
