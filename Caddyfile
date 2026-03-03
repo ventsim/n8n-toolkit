@@ -1,0 +1,8 @@
+n8ntest.local {
+    reverse_proxy n8n:5678
+}
+
+localhost.n8n {
+    tls internal
+    reverse_proxy n8n:5678
+}

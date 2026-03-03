@@ -26,12 +26,19 @@ add_hosts_entry() {
 }
 
 ensure_docker_group() {
-  if ! groups "$USER" | grep -q '\bdocker\b'; then
+  if ! groups "$USER" | grep -q 'docker'; then
     log_warn "User not in docker group, adding..."
     sudo usermod -aG docker "$USER"
-    log_info "Re-login required. Running newgrp docker"
-    newgrp docker
+    log_info "Re-login required. Running: exec su - USER "
+    exec su - "$USER"   
    # log_error "Re-login required. Run: newgrp docker"
     exit 0
+  fi
+}
+create_service_user() {
+  local user="n8nsvc"
+  if ! id "$user" &>/dev/null; then
+    log_info "Creating service user: $user"
+    sudo useradd -r -m -d /opt/n8n -s /usr/sbin/nologin "$user"
   fi
 }

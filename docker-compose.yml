@@ -1,0 +1,39 @@
+services:
+  n8n:
+    image: n8nio/n8n:${N8N_VERSION}
+    container_name: n8n
+    restart: unless-stopped
+    user: "${UID}:${GID}"
+    environment:
+      N8N_HOST: ${DOMAIN}
+      N8N_PORT: ${PORT}
+      N8N_PROTOCOL: 'https'
+      WEBHOOK_URL: https://${DOMAIN}/
+      N8N_PROXY_HOPS: "1"
+      EXECUTIONS_TIMEOUT: "3600"
+      EXECUTIONS_TIMEOUT_MAX: "7200"
+      N8N_ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    volumes:
+      - ./data/n8n:/home/node/.n8n
+    expose:
+      - "${PORT}"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    depends_on:
+      - n8n
+    ports:
+detect_latest_n8n() {
+  curl -s https://registry.hub.docker.com/v2/repositories/n8nio/n8n/tags?page_size=100 \
+    | grep -oE '"name":"[0-9]+\.[0-9]+\.[0-9]+"' \
+    | sed 's/"name":"//;s/"//' \
+    | sort -Vr | head -n1
+}
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy:/data
+      - ./data/caddy-config:/config
