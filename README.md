@@ -92,6 +92,7 @@ git clone https://github.com/n8n-toolkit.git
 cd n8n-toolkit
 chmod +x setup.sh
 ./setup.sh
+# /setup.sh --interactive
 ```
 The installer will:
 

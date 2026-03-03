@@ -26,15 +26,27 @@ add_hosts_entry() {
 }
 
 ensure_docker_group() {
-  if ! groups "$USER" | grep -q 'docker'; then
-    log_warn "User not in docker group, adding..."
-    sudo usermod -aG docker "$USER"
-    log_info "Re-login required. Running: exec su - USER "
-    exec su - "$USER"   
-   # log_error "Re-login required. Run: newgrp docker"
-    exit 0
+  if id -nG "$USER" | grep -qw docker; then
+    DOCKER_CMD="docker"
+    return
   fi
+
+  log_warn "User '$USER' is not in the docker group."
+  log_info "Adding user to docker group..."
+  sudo usermod -aG docker "$USER"
+
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "Docker group membership updated."
+  echo "You must log out and log back in"
+  echo "to use Docker without sudo."
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+
+  # Use sudo for this session
+  DOCKER_CMD="sudo docker"
 }
+
 create_service_user() {
   local user="n8nsvc"
   if ! id "$user" &>/dev/null; then

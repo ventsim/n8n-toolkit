@@ -88,6 +88,7 @@ fi
 # ========================
 # Docker group
 # ========================
+DOCKER_CMD="docker"
 ensure_docker_group
 
 # ========================
